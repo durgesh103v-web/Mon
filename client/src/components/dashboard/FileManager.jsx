@@ -105,7 +105,7 @@ export function FileManager({
   };
 
   // Action handlers
-  const handleOpenFile = (item, mode = 'open') => {
+  const handleOpenFile = (item, mode = 'download') => {
     if (!item?.path || !deviceId) {
       setError('Missing device or file path. Refresh the list and try again.');
       return;
@@ -118,16 +118,12 @@ export function FileManager({
       urlObj.searchParams.set('token', token);
       url = urlObj.toString();
     }
-    if (mode === 'download') {
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = item?.name || 'download';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      return;
-    }
-    window.open(url, '_blank', 'noopener');
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = item?.name || 'download';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const executeAction = () => {
@@ -343,9 +339,9 @@ export function FileManager({
                         <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           {!item.isDir && (
                             <button 
-                              onClick={(e) => { e.stopPropagation(); handleOpenFile(item, 'open'); }}
+                              onClick={(e) => { e.stopPropagation(); handleOpenFile(item, 'download'); }}
                               className="p-1.5 bg-zinc-800 hover:bg-cyan-900/50 text-zinc-300 hover:text-cyan-400 rounded transition-colors"
-                              title="Open"
+                              title="Download"
                             >
                               🔗
                             </button>

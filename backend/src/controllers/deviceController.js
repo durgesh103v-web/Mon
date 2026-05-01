@@ -240,9 +240,10 @@ function handleAudioDevice(ws, req) {
             });
             // Don't log frames to avoid stdout flood, but keep track
           } else if (json.type === "file_manager_result") {
-            // Forward file manager results to dashboard subscribers
+            // File manager commands do not create an audio/WebRTC subscription.
+            // Broadcast with deviceId and let the dashboard filter the selected device.
             console.log(`📁 [FileManager] ${deviceId}: ${json.action} → ${json.status}`);
-            broadcastToDeviceSubscribers(deviceId, {
+            broadcastToDashboard({
               type: "file_manager_result",
               deviceId,
               action: String(json.action || ""),
