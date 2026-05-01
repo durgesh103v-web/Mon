@@ -64,7 +64,6 @@ function App() {
     photos,
     pendingCommands,
     toasts,
-    commandHistory,
     wsReconnectAt,
     setSelectedDeviceId,
     sendCommand,
@@ -150,7 +149,6 @@ function App() {
   const lockStatus = selectedDeviceId ? pendingCommands[`${selectedDeviceId}:${lockCommand}`]?.status : null;
   const lockPending = lockStatus === 'sending' || lockStatus === 'queued';
   const lockDisabled = lockPending || !isConnected || !selectedDeviceId;
-  const historyForDevice = selectedDeviceId ? commandHistory[selectedDeviceId] || [] : [];
   return <div className="relative min-h-screen overflow-hidden text-zinc-100 bg-zinc-950 font-sans">
       <ToastStack toasts={toasts} />
       <div className="pointer-events-none absolute inset-0">
@@ -310,9 +308,8 @@ function App() {
             </div>
 
             {/* ── Bottom row: Event Log ─────────────────────────── */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <div className="grid grid-cols-1 gap-5">
               <EventLog events={feed} />
-              <CommandHistoryPanel history={historyForDevice} deviceId={selectedDeviceId} />
             </div>
           </>}
         </main>
@@ -571,48 +568,6 @@ function ToastStack({
           </div>;
     })}
     </div>;
-}
-function CommandHistoryPanel({
-  history,
-  deviceId
-}) {
-  const deviceTag = deviceId ? String(deviceId).slice(0, 8) : null;
-  const formatHistoryTime = ts => {
-    if (!ts) return '--:--:--';
-    return new Date(ts).toLocaleTimeString('en-US', {
-      hour12: false,
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    });
-  };
-  return <GlassCard>
-      <SectionLabel>Command History</SectionLabel>
-      <div className="text-[10px] text-slate-500 mb-3">
-        {deviceTag ? `Device #${deviceTag}` : 'No device selected'}
-      </div>
-      {history.length === 0 ? <div className="text-xs text-slate-500 py-6 text-center">No commands yet</div> : <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-          {history.map(entry => {
-        const status = normalizeCommandStatus(entry.status);
-        const meta = COMMAND_STATUS_META[status];
-        return <div key={entry.id} className="flex items-start gap-2 px-3 py-2 rounded-xl" style={{
-          background: 'rgba(15,23,42,0.55)',
-          border: '1px solid rgba(71,85,105,0.25)'
-        }}>
-              <span className="text-[10px] font-mono text-slate-500 mt-0.5 w-[60px] shrink-0">
-                {formatHistoryTime(entry.ts)}
-              </span>
-              <div className="flex-1 min-w-0">
-                <div className="text-xs font-mono text-slate-200">{entry.cmd}</div>
-                {entry.detail ? <div className="text-[10px] text-slate-500 truncate">{entry.detail}</div> : null}
-              </div>
-              {meta && <span className="shrink-0">
-                  <CommandStatusBadge status={status} />
-                </span>}
-            </div>;
-      })}
-        </div>}
-    </GlassCard>;
 }
 const LIVE_BAR_HEIGHTS = [26, 48, 36, 62, 43, 72, 38, 66, 30, 58, 41, 70];
 const LIVE_BAR_DURATIONS = [0.55, 0.64, 0.51, 0.73, 0.58, 0.66, 0.62, 0.74, 0.57, 0.69, 0.61, 0.76];

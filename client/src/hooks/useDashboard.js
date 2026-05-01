@@ -18,7 +18,6 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
   const [photos, setPhotos] = useState([]);
   const [pendingCommands, setPendingCommands] = useState({});
   const [toasts, setToasts] = useState([]);
-  const [commandHistory, setCommandHistory] = useState({});
   const [wsReconnectAt, setWsReconnectAt] = useState(null);
 
   const wsRef = useRef(null);
@@ -48,16 +47,6 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
       setToasts(prev => prev.filter(item => item.id !== id));
       delete timers[id];
     }, 4500);
-  }, []);
-  const pushHistory = useCallback((deviceId, entry) => {
-    if (!deviceId || !entry) return;
-    setCommandHistory(prev => {
-      const list = prev[deviceId] || [];
-      return {
-        ...prev,
-        [deviceId]: [entry, ...list].slice(0, 60)
-      };
-    });
   }, []);
   const reconnectNow = useCallback(() => {
     if (reconnectTimerRef.current) {
@@ -209,13 +198,6 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
 
     addFeed(`Sending ${cmd}...`);
     setCommandStatus(targetId, cmd, 'sending');
-    pushHistory(targetId, {
-      id: `${targetId}-${cmd}-${Date.now()}`,
-      cmd,
-      status: 'sending',
-      detail: '',
-      ts: Date.now()
-    });
 
     // Primary path: send via control WebSocket so backend can apply
     // per-dashboard audio subscriptions (required for live stream audio routing).
@@ -229,13 +211,6 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
         }));
         addFeed(`Routed ${cmd} to ${targetId} via control_ws`);
         setCommandStatus(targetId, cmd, 'sent');
-        pushHistory(targetId, {
-          id: `${targetId}-${cmd}-${Date.now()}`,
-          cmd,
-          status: 'sent',
-          detail: 'control_ws',
-          ts: Date.now()
-        });
         return;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -250,13 +225,6 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
         extra
       });
       setCommandStatus(targetId, cmd, 'queued');
-      pushHistory(targetId, {
-        id: `${targetId}-${cmd}-${Date.now()}`,
-        cmd,
-        status: 'queued',
-        detail: 'control_ws',
-        ts: Date.now()
-      });
       addFeed(`Queued ${cmd} for ${targetId} (control_ws connecting)`);
       return;
     }
@@ -282,27 +250,13 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
       }
       addFeed(`Routed ${cmd} to ${targetId} via ${result.status || 'ok'}`);
       setCommandStatus(targetId, cmd, 'sent');
-      pushHistory(targetId, {
-        id: `${targetId}-${cmd}-${Date.now()}`,
-        cmd,
-        status: 'sent',
-        detail: 'http',
-        ts: Date.now()
-      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       addFeed(`Failed to send ${cmd}: ${message}`);
       setCommandStatus(targetId, cmd, 'error');
-      pushHistory(targetId, {
-        id: `${targetId}-${cmd}-${Date.now()}`,
-        cmd,
-        status: 'error',
-        detail: message,
-        ts: Date.now()
-      });
       pushToast('error', `Failed to send ${cmd}`, targetId);
     }
-  }, [addFeed, pushHistory, pushToast, setCommandStatus]);
+  }, [addFeed, pushToast, setCommandStatus]);
   const onAudioDataRef = useRef(onAudioData);
   const onWebRTCMessageRef = useRef(onWebRTCMessage);
   const onCameraFrameRef = useRef(onCameraFrame);
@@ -585,13 +539,6 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
             addFeed(`⏳ PENDING ${prefix} ${cmd} via ${route}`);
             if (msg.deviceId && cmd) {
               setCommandStatus(String(msg.deviceId), cmd, 'queued');
-              pushHistory(String(msg.deviceId), {
-                id: `${String(msg.deviceId)}-${cmd}-${Date.now()}`,
-                cmd,
-                status: 'queued',
-                detail: route,
-                ts: Date.now()
-              });
             }
             return;
           }
@@ -602,13 +549,6 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
             addFeed(`🚀 DISPATCH ${prefix} ${cmd} (${status})`);
             if (msg.deviceId && cmd) {
               setCommandStatus(String(msg.deviceId), cmd, status === 'sent' ? 'sent' : 'queued');
-              pushHistory(String(msg.deviceId), {
-                id: `${String(msg.deviceId)}-${cmd}-${Date.now()}`,
-                cmd,
-                status: status === 'sent' ? 'sent' : 'queued',
-                detail: msg.route ? String(msg.route) : '',
-                ts: Date.now()
-              });
             }
             return;
           }
@@ -626,13 +566,6 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
               } else {
                 setCommandStatus(String(msg.deviceId), cmd, 'error');
               }
-              pushHistory(String(msg.deviceId), {
-                id: `${String(msg.deviceId)}-${cmd}-${Date.now()}`,
-                cmd,
-                status: status === 'success' ? 'ack' : 'error',
-                detail: msg.detail ? String(msg.detail) : '',
-                ts: Date.now()
-              });
               pushToast(status === 'success' ? 'success' : 'error', `${cmd} ${status === 'success' ? 'acknowledged' : 'failed'}`, String(msg.deviceId));
             }
             if (msg.deviceId && cmd === 'voice_profile' && msg.detail) {
@@ -723,7 +656,7 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
       connectRef.current = null;
       wsRef.current?.close();
     };
-  }, [addFeed, pushHistory, pushToast, removeDevice, loadPhotos, upsertDevice, mergeDeviceList, setCommandStatus]);
+  }, [addFeed, pushToast, removeDevice, loadPhotos, upsertDevice, mergeDeviceList, setCommandStatus]);
   useEffect(() => {
     let stopped = false;
     const loadHealth = async () => {
@@ -795,7 +728,6 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
     photos,
     pendingCommands,
     toasts,
-    commandHistory,
     wsReconnectAt,
 
     setSelectedDeviceId,

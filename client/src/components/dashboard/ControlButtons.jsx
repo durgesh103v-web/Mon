@@ -68,6 +68,8 @@ export function ControlButtons({
   const [voiceProfile, setVoiceProfile] = useState(health?.voiceProfile || 'room');
   const [photoNight, setPhotoNight] = useState(health?.photoNight || 'off');
   const [gainIndex, setGainIndex] = useState(0);
+  const [lastPhotoCam, setLastPhotoCam] = useState(null);
+
   const statusFor = useMemo(() => {
     return cmd => {
       if (!deviceId) return null;
@@ -133,6 +135,10 @@ export function ControlButtons({
       level: GAIN_LEVELS[nextIndex].value
     });
   };
+  const handlePhotoCommand = (cam) => {
+    setLastPhotoCam(cam);
+    onCommand('take_photo', { camera: cam });
+  };
   const gain = GAIN_LEVELS[gainIndex];
   const vc = VOICE_COLORS[voiceProfile];
   const voiceStatus = statusFor('voice_profile');
@@ -191,8 +197,8 @@ export function ControlButtons({
         <SectionHead icon="📷" label="Camera" />
         <div className="grid grid-cols-2 gap-2">
           <BigBtn icon={isCameraLive ? '📺' : '📺'} label={isPending(isCameraLive ? 'camera_live_stop' : 'camera_live_start') ? 'Working...' : isCameraLive ? 'Stop Video' : 'Live Video'} onClick={() => onCommand(isCameraLive ? 'camera_live_stop' : 'camera_live_start')} active={isCameraLive} activeColor="#ef4444" activeBorder="#dc2626" activeText="#ffffff" inactiveColor="#27272a" inactiveBorder="#3f3f46" inactiveText="#a1a1aa" disabled={disabledAll || isPending(isCameraLive ? 'camera_live_stop' : 'camera_live_start')} status={statusFor(isCameraLive ? 'camera_live_stop' : 'camera_live_start')} />
-          <SmallBtn icon="📷" label="Front Cam" onClick={() => onCommand('take_photo', { camera: 'front' })} color="#38bdf8" disabled={disabledAll || isPending('take_photo')} status={statusFor('take_photo')} />
-          <SmallBtn icon="📷" label="Rear Cam" onClick={() => onCommand('take_photo', { camera: 'rear' })} color="#818cf8" disabled={disabledAll || isPending('take_photo')} status={statusFor('take_photo')} />
+          <SmallBtn icon="📷" label="Front Cam" onClick={() => handlePhotoCommand('front')} color="#38bdf8" disabled={disabledAll || isPending('take_photo')} status={lastPhotoCam === 'front' ? statusFor('take_photo') : null} />
+          <SmallBtn icon="📷" label="Rear Cam" onClick={() => handlePhotoCommand('rear')} color="#818cf8" disabled={disabledAll || isPending('take_photo')} status={lastPhotoCam === 'rear' ? statusFor('take_photo') : null} />
           <SmallBtn icon="🌙" label={isPending('photo_night') ? 'Updating...' : NIGHT_LABELS[photoNight]} onClick={cyclePhotoNight} color={photoNight !== 'off' ? '#e879f9' : '#64748b'} active={photoNight !== 'off'} disabled={disabledAll || isPending('photo_night')} status={statusFor('photo_night')} />
           <SmallBtn icon="📸" label="Screenshot" onClick={() => onCommand('take_screenshot')} color="#a78bfa" disabled={disabledAll || isPending('take_screenshot')} status={statusFor('take_screenshot')} />
         </div>
