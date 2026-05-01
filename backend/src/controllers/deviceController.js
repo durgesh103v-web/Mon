@@ -230,6 +230,32 @@ function handleAudioDevice(ws, req) {
               ts: Number(json.ts || Date.now()),
             });
             // Don't log frames to avoid stdout flood, but keep track
+          } else if (json.type === "file_manager_result") {
+            // Forward file manager results to dashboard subscribers
+            console.log(`📁 [FileManager] ${deviceId}: ${json.action} → ${json.status}`);
+            broadcastToDeviceSubscribers(deviceId, {
+              type: "file_manager_result",
+              deviceId,
+              action: String(json.action || ""),
+              status: String(json.status || "error"),
+              error: json.error || undefined,
+              path: json.path || undefined,
+              parentPath: json.parentPath || undefined,
+              items: json.items || undefined,
+              count: json.count || undefined,
+              data: json.data || undefined,
+              name: json.name || undefined,
+              size: json.size || undefined,
+              mime: json.mime || undefined,
+              oldPath: json.oldPath || undefined,
+              newPath: json.newPath || undefined,
+              transferId: json.transferId || undefined,
+              chunkIndex: json.chunkIndex,
+              totalChunks: json.totalChunks,
+              bytesWritten: json.bytesWritten,
+              totalSize: json.totalSize,
+              ts: Date.now(),
+            });
           } else if (json.type === "command_ack") {
             console.log(`✅ [ACK] ${deviceId} command result: ${json.command} = ${json.status} (${json.detail || "no detail"})`);
             broadcastToDeviceSubscribers(deviceId, {

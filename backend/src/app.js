@@ -67,7 +67,7 @@ function createApp() {
     }),
   );
   
-  app.use(express.json({ limit: "10mb" }));
+  app.use(express.json({ limit: "15mb" }));
 
   app.get("/health", apiController.health);
 

