@@ -44,6 +44,7 @@ const uploadRecording = multer({
 const router = express.Router();
 
 router.get("/webrtc-config", optionalAuth, apiController.webrtcConfig);
+router.get("/devices", optionalAuth, apiController.listDevices);
 
 router.get("/photos", apiController.listPhotos);
 router.get("/version", apiController.versionInfo);

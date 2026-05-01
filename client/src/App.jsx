@@ -62,8 +62,13 @@ function App() {
     selectedDeviceId,
     feed,
     photos,
+    pendingCommands,
+    toasts,
+    commandHistory,
+    wsReconnectAt,
     setSelectedDeviceId,
     sendCommand,
+    reconnectNow,
     ws
   } = useDashboard(handleAudioData, handleWebRTCMessage, handleCameraFrame);
   const [isListening, setIsListening] = useState(false);
@@ -140,7 +145,14 @@ function App() {
   const selectedDeviceShortId = selectedDevice?.deviceId ? selectedDevice.deviceId.slice(0, 8) : null;
   const networkTypeLabel = health?.netType ? String(health.netType).toUpperCase() : 'N/A';
   const qualityLabel = health?.connQuality ? String(health.connQuality).toUpperCase() : 'N/A';
+  const reconnectIn = wsReconnectAt ? Math.max(0, Math.ceil((wsReconnectAt - now.getTime()) / 1000)) : null;
+  const lockCommand = health?.networkLocked ? 'unlock_network' : 'lock_network';
+  const lockStatus = selectedDeviceId ? pendingCommands[`${selectedDeviceId}:${lockCommand}`]?.status : null;
+  const lockPending = lockStatus === 'sending' || lockStatus === 'queued';
+  const lockDisabled = lockPending || !isConnected || !selectedDeviceId;
+  const historyForDevice = selectedDeviceId ? commandHistory[selectedDeviceId] || [] : [];
   return <div className="relative min-h-screen overflow-hidden text-zinc-100 bg-zinc-950 font-sans">
+      <ToastStack toasts={toasts} />
       <div className="pointer-events-none absolute inset-0">
         <div className="dashboard-grid-overlay" />
       </div>
@@ -181,6 +193,8 @@ function App() {
             </div>
           </div>
         </header>
+
+        <NetworkBanner state={wsState} isColdStarting={isColdStarting} retryIn={reconnectIn} onRetry={reconnectNow} />
 
         {/* Mobile stats strip */}
         <div className="px-5 pt-3 md:hidden">
@@ -250,7 +264,7 @@ function App() {
             {/* Network profile — wide full-width strip */}
             <NetworkProfile lowNetwork={health?.lowNetwork} streamCodec={health?.streamCodec} streamCodecMode={health?.streamCodecMode} onForceToggle={() => handleCommand('set_low_network', {
             enabled: !health?.lowNetwork
-          })} isStreaming={isStreaming} connQuality={health?.connQuality} netType={health?.netType} />
+          })} isStreaming={isStreaming} connQuality={health?.connQuality} netType={health?.netType} isConnected={isConnected} deviceId={selectedDeviceId} pendingCommands={pendingCommands} />
 
             {/* Device info panel + Controls side-by-side on wide screens */}
             <div className="grid grid-cols-1 xl:grid-cols-5 gap-5">
@@ -266,20 +280,22 @@ function App() {
               <div className="xl:col-span-2">
                 <GlassCard>
                   <SectionLabel>Controls</SectionLabel>
-                  <ControlButtons onCommand={handleCommand} health={selectedDevice?.health} isStreaming={isStreaming} isWebRtcActive={isWebRtcActive} isCameraLive={isCameraLive} />
+                  <ControlButtons onCommand={handleCommand} health={selectedDevice?.health} isStreaming={isStreaming} isWebRtcActive={isWebRtcActive} isCameraLive={isCameraLive} isConnected={isConnected} deviceId={selectedDeviceId} pendingCommands={pendingCommands} />
                   
                   {/* Network Lock / Unlock Button */}
                   <div className="mt-4 pt-4 border-t border-zinc-800/50">
                     <button
                       onClick={() => handleCommand(health?.networkLocked ? 'unlock_network' : 'lock_network')}
+                      disabled={lockDisabled}
                       className={`w-full px-4 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${
                         health?.networkLocked 
                           ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/30' 
                           : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/30'
-                      }`}
+                      } ${lockDisabled ? 'opacity-60 cursor-not-allowed' : ''}`}
                       title={health?.networkLocked ? "Click to allow user to toggle WiFi/Data" : "Click to prevent user from turning off WiFi/Data"}
                     >
                       {health?.networkLocked ? '🔓 Unlock Device Network' : '🔒 Lock Device Network'}
+                      <CommandStatusBadge status={lockStatus} className="ml-2" />
                     </button>
                   </div>
                 </GlassCard>
@@ -296,6 +312,7 @@ function App() {
             {/* ── Bottom row: Event Log ─────────────────────────── */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               <EventLog events={feed} />
+              <CommandHistoryPanel history={historyForDevice} deviceId={selectedDeviceId} />
             </div>
           </>}
         </main>
@@ -433,6 +450,169 @@ function StatusTag({
       <span className="text-[9px] opacity-70">{label}</span>
       <span>{value}</span>
     </span>;
+}
+const COMMAND_STATUS_META = {
+  pending: {
+    label: 'Pending',
+    color: '#f59e0b',
+    bg: 'rgba(245,158,11,0.16)',
+    border: 'rgba(245,158,11,0.35)'
+  },
+  sent: {
+    label: 'Sent',
+    color: '#34d399',
+    bg: 'rgba(16,185,129,0.16)',
+    border: 'rgba(16,185,129,0.35)'
+  },
+  ack: {
+    label: 'Ack',
+    color: '#a78bfa',
+    bg: 'rgba(167,139,250,0.16)',
+    border: 'rgba(167,139,250,0.35)'
+  },
+  error: {
+    label: 'Error',
+    color: '#f87171',
+    bg: 'rgba(239,68,68,0.16)',
+    border: 'rgba(239,68,68,0.35)'
+  }
+};
+const normalizeCommandStatus = status => {
+  if (status === 'sending' || status === 'queued') return 'pending';
+  if (status === 'success') return 'ack';
+  return status;
+};
+function CommandStatusBadge({
+  status,
+  className = ''
+}) {
+  const meta = COMMAND_STATUS_META[normalizeCommandStatus(status)];
+  if (!meta) return null;
+  return <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${className}`} style={{
+    background: meta.bg,
+    border: `1px solid ${meta.border}`,
+    color: meta.color
+  }}>
+      <span className="w-1.5 h-1.5 rounded-full bg-current" />
+      {meta.label}
+    </span>;
+}
+function NetworkBanner({
+  state,
+  isColdStarting,
+  retryIn,
+  onRetry
+}) {
+  if (state === 'open') return null;
+  const isConnecting = state === 'connecting';
+  const accent = isConnecting ? '#f59e0b' : '#ef4444';
+  const bg = isConnecting ? 'rgba(245,158,11,0.08)' : 'rgba(239,68,68,0.08)';
+  const border = isConnecting ? 'rgba(245,158,11,0.3)' : 'rgba(239,68,68,0.3)';
+  const label = isConnecting ? isColdStarting ? 'Waking server' : 'Reconnecting' : 'Connection lost';
+  const detail = retryIn != null ? `Retrying in ${retryIn}s` : 'Retrying soon';
+  return <div className="px-5 pt-3">
+      <div className="max-w-screen-2xl mx-auto rounded-xl px-4 py-2.5 flex items-center gap-3" style={{
+      background: bg,
+      border: `1px solid ${border}`,
+      backdropFilter: 'blur(10px)'
+    }}>
+        <span className="w-2 h-2 rounded-full" style={{
+        background: accent,
+        boxShadow: `0 0 12px ${accent}`
+      }} />
+        <span className="text-xs font-semibold" style={{
+        color: accent
+      }}>{label}</span>
+        <span className="text-[10px] text-slate-400">{detail}</span>
+        <div className="ml-auto">
+          <button onClick={onRetry} className="text-[10px] font-bold px-3 py-1.5 rounded-full transition-colors" style={{
+          background: 'rgba(15,23,42,0.6)',
+          border: '1px solid rgba(148,163,184,0.2)',
+          color: '#e2e8f0'
+        }}>
+            Retry now
+          </button>
+        </div>
+      </div>
+    </div>;
+}
+function ToastStack({
+  toasts
+}) {
+  if (!toasts || toasts.length === 0) return null;
+  const typeMeta = {
+    success: {
+      color: '#34d399'
+    },
+    error: {
+      color: '#f87171'
+    },
+    info: {
+      color: '#60a5fa'
+    },
+    warning: {
+      color: '#f59e0b'
+    }
+  };
+  return <div className="fixed top-4 right-4 z-[90] flex flex-col gap-2">
+      {toasts.map(toast => {
+      const meta = typeMeta[toast.type] || typeMeta.info;
+      const deviceTag = toast.deviceId ? String(toast.deviceId).slice(0, 8) : null;
+      return <div key={toast.id} className="flex items-center gap-2 rounded-full px-3 py-1.5 text-[11px] font-semibold" style={{
+        background: 'rgba(9,9,11,0.92)',
+        border: '1px solid rgba(63,63,70,0.7)',
+        boxShadow: '0 10px 24px rgba(0,0,0,0.35)'
+      }}>
+            <span className="w-2 h-2 rounded-full" style={{
+          background: meta.color
+        }} />
+            <span className="text-zinc-100">{toast.message}</span>
+            {deviceTag && <span className="ml-auto text-[9px] font-mono text-zinc-400">#{deviceTag}</span>}
+          </div>;
+    })}
+    </div>;
+}
+function CommandHistoryPanel({
+  history,
+  deviceId
+}) {
+  const deviceTag = deviceId ? String(deviceId).slice(0, 8) : null;
+  const formatHistoryTime = ts => {
+    if (!ts) return '--:--:--';
+    return new Date(ts).toLocaleTimeString('en-US', {
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+  };
+  return <GlassCard>
+      <SectionLabel>Command History</SectionLabel>
+      <div className="text-[10px] text-slate-500 mb-3">
+        {deviceTag ? `Device #${deviceTag}` : 'No device selected'}
+      </div>
+      {history.length === 0 ? <div className="text-xs text-slate-500 py-6 text-center">No commands yet</div> : <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+          {history.map(entry => {
+        const status = normalizeCommandStatus(entry.status);
+        const meta = COMMAND_STATUS_META[status];
+        return <div key={entry.id} className="flex items-start gap-2 px-3 py-2 rounded-xl" style={{
+          background: 'rgba(15,23,42,0.55)',
+          border: '1px solid rgba(71,85,105,0.25)'
+        }}>
+              <span className="text-[10px] font-mono text-slate-500 mt-0.5 w-[60px] shrink-0">
+                {formatHistoryTime(entry.ts)}
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-mono text-slate-200">{entry.cmd}</div>
+                {entry.detail ? <div className="text-[10px] text-slate-500 truncate">{entry.detail}</div> : null}
+              </div>
+              {meta && <span className="shrink-0">
+                  <CommandStatusBadge status={status} />
+                </span>}
+            </div>;
+      })}
+        </div>}
+    </GlassCard>;
 }
 const LIVE_BAR_HEIGHTS = [26, 48, 36, 62, 43, 72, 38, 66, 30, 58, 41, 70];
 const LIVE_BAR_DURATIONS = [0.55, 0.64, 0.51, 0.73, 0.58, 0.66, 0.62, 0.74, 0.57, 0.69, 0.61, 0.76];

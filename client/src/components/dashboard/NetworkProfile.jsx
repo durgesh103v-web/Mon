@@ -5,8 +5,14 @@ export function NetworkProfile({
   onForceToggle,
   isStreaming = false,
   connQuality,
-  netType
+  netType,
+  isConnected = true,
+  deviceId,
+  pendingCommands = {}
 }) {
+  const status = deviceId ? pendingCommands[`${deviceId}:set_low_network`]?.status : null;
+  const isPending = status === 'sending' || status === 'queued';
+  const disableToggle = !isConnected || !deviceId || isPending;
   const modeLabel = lowNetwork ? '⚡ Low-Bandwidth Mode' : `📡 High-Quality Mode`;
   const modeDesc = lowNetwork ? 'Server 2.5× gain boost active • Optimized for weak signal' : streamCodecMode === 'auto' ? 'HQ Opus auto-codec • Max fidelity for clear voice' : streamCodec === 'pcm' ? 'Uncompressed PCM 16-bit • Zero loss' : `${streamCodec || 'PCM'} ${streamCodecMode || ''}`;
   const qualColor = connQuality === 'excellent' ? '#10b981' : connQuality === 'good' ? '#6366f1' : connQuality === 'poor' ? '#ef4444' : '#f59e0b';
@@ -73,16 +79,64 @@ export function NetworkProfile({
       </div>
 
       {/* Right — toggle button */}
-      <button onClick={onForceToggle} className="ml-auto shrink-0 text-xs font-bold px-4 py-2 rounded-xl transition-all duration-200" style={{
+      <button onClick={onForceToggle} disabled={disableToggle} className="ml-auto shrink-0 text-xs font-bold px-4 py-2 rounded-xl transition-all duration-200 disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2" style={{
       background: lowNetwork ? 'rgba(245,158,11,0.15)' : 'rgba(14,165,233,0.14)',
       border: `1px solid ${lowNetwork ? 'rgba(245,158,11,0.35)' : 'rgba(34,211,238,0.42)'}`,
       color: lowNetwork ? '#fbbf24' : '#67e8f9'
     }} onMouseEnter={e => {
+      if (disableToggle) return;
       e.currentTarget.style.transform = 'scale(1.03)';
     }} onMouseLeave={e => {
+      if (disableToggle) return;
       e.currentTarget.style.transform = 'scale(1)';
     }}>
-        {lowNetwork ? '▲ Switch to HQ' : '▼ Force Low-BW'}
+        <span>{isPending ? 'Working...' : lowNetwork ? '▲ Switch to HQ' : '▼ Force Low-BW'}</span>
+        <CommandStatusPill status={status} />
       </button>
     </div>;
+}
+const COMMAND_STATUS_META = {
+  pending: {
+    label: 'Pending',
+    color: '#f59e0b',
+    bg: 'rgba(245,158,11,0.16)',
+    border: 'rgba(245,158,11,0.35)'
+  },
+  sent: {
+    label: 'Sent',
+    color: '#34d399',
+    bg: 'rgba(16,185,129,0.16)',
+    border: 'rgba(16,185,129,0.35)'
+  },
+  ack: {
+    label: 'Ack',
+    color: '#a78bfa',
+    bg: 'rgba(167,139,250,0.16)',
+    border: 'rgba(167,139,250,0.35)'
+  },
+  error: {
+    label: 'Error',
+    color: '#f87171',
+    bg: 'rgba(239,68,68,0.16)',
+    border: 'rgba(239,68,68,0.35)'
+  }
+};
+const normalizeCommandStatus = status => {
+  if (status === 'sending' || status === 'queued') return 'pending';
+  if (status === 'success') return 'ack';
+  return status;
+};
+function CommandStatusPill({
+  status
+}) {
+  const meta = COMMAND_STATUS_META[normalizeCommandStatus(status)];
+  if (!meta) return null;
+  return <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider" style={{
+    background: meta.bg,
+    border: `1px solid ${meta.border}`,
+    color: meta.color
+  }}>
+      <span className="w-1 h-1 rounded-full bg-current" />
+      {meta.label}
+    </span>;
 }

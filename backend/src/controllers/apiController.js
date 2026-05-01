@@ -62,6 +62,11 @@ function health(req, res) {
   res.json({ status: "ok", devices: deviceStore.size(), ts: Date.now() });
 }
 
+function listDevices(req, res) {
+  const devices = deviceStore.listDevices();
+  res.json({ status: "ok", devices, ts: Date.now() });
+}
+
 // ── Layer 2 & 12: HTTP Fallback & Heartbeat ──
 
 function sync(req, res) {
@@ -717,6 +722,7 @@ async function deleteRecording(req, res) {
 
 module.exports = {
   health,
+  listDevices,
   webrtcConfig,
   listRecordings,
   listPhotos,

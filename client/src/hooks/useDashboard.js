@@ -16,15 +16,120 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
   const [serverHealth, setServerHealth] = useState(null);
   const [feed, setFeed] = useState([]);
   const [photos, setPhotos] = useState([]);
+  const [pendingCommands, setPendingCommands] = useState({});
+  const [toasts, setToasts] = useState([]);
+  const [commandHistory, setCommandHistory] = useState({});
+  const [wsReconnectAt, setWsReconnectAt] = useState(null);
 
   const wsRef = useRef(null);
+  const connectRef = useRef(null);
   const reconnectTimerRef = useRef(null);
   const coldStartTimerRef = useRef(null);
   const pendingWsCommandsRef = useRef([]);
   const lastCameraUrlsRef = useRef({});
+  const lastWsMessageAtRef = useRef(0);
+  const pendingTimersRef = useRef({});
+  const toastTimersRef = useRef({});
   const selectedDevice = useMemo(() => devices.find(device => device.deviceId === selectedDeviceId) ?? null, [devices, selectedDeviceId]);
   const addFeed = useCallback(message => {
     setFeed(prev => [message, ...prev].slice(0, 80));
+  }, []);
+  const pushToast = useCallback((type, message, deviceId) => {
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+    setToasts(prev => [{
+      id,
+      type,
+      message,
+      deviceId: deviceId || null,
+      ts: Date.now()
+    }, ...prev].slice(0, 6));
+    const timers = toastTimersRef.current;
+    timers[id] = window.setTimeout(() => {
+      setToasts(prev => prev.filter(item => item.id !== id));
+      delete timers[id];
+    }, 4500);
+  }, []);
+  const pushHistory = useCallback((deviceId, entry) => {
+    if (!deviceId || !entry) return;
+    setCommandHistory(prev => {
+      const list = prev[deviceId] || [];
+      return {
+        ...prev,
+        [deviceId]: [entry, ...list].slice(0, 60)
+      };
+    });
+  }, []);
+  const reconnectNow = useCallback(() => {
+    if (reconnectTimerRef.current) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    setWsReconnectAt(null);
+    const ws = wsRef.current;
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      try {
+        ws.close();
+      } catch {
+        // Best-effort close before reconnect.
+      }
+    }
+    if (connectRef.current) {
+      connectRef.current();
+    }
+  }, []);
+  const setCommandStatus = useCallback((deviceId, cmd, status) => {
+    if (!deviceId || !cmd) return;
+    const key = `${deviceId}:${cmd}`;
+    const timers = pendingTimersRef.current;
+    if (timers[key]) {
+      window.clearTimeout(timers[key]);
+      delete timers[key];
+    }
+    if (!status) {
+      setPendingCommands(prev => {
+        if (!prev[key]) return prev;
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      return;
+    }
+    setPendingCommands(prev => ({
+      ...prev,
+      [key]: {
+        status,
+        ts: Date.now()
+      }
+    }));
+    if (status === 'error') {
+      timers[key] = window.setTimeout(() => {
+        setPendingCommands(prev => {
+          if (!prev[key]) return prev;
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+        delete timers[key];
+      }, 3000);
+    }
+  }, []);
+  const mergeDeviceList = useCallback(incoming => {
+    setDevices(prev => {
+      const byId = new Map(prev.map(device => [device.deviceId, device]));
+      return (incoming || []).map(device => {
+        const existing = byId.get(device.deviceId);
+        return {
+          ...existing,
+          ...device,
+          health: {
+            ...existing?.health,
+            ...device.health
+          },
+          sms: device.sms ?? existing?.sms,
+          calls: device.calls ?? existing?.calls
+        };
+      });
+    });
   }, []);
   const upsertDevice = useCallback(next => {
     setDevices(prev => {
@@ -103,6 +208,14 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
     lastCommandRef.current = { key: dedupeKey, ts: now };
 
     addFeed(`Sending ${cmd}...`);
+    setCommandStatus(targetId, cmd, 'sending');
+    pushHistory(targetId, {
+      id: `${targetId}-${cmd}-${Date.now()}`,
+      cmd,
+      status: 'sending',
+      detail: '',
+      ts: Date.now()
+    });
 
     // Primary path: send via control WebSocket so backend can apply
     // per-dashboard audio subscriptions (required for live stream audio routing).
@@ -115,10 +228,19 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
           ...extra
         }));
         addFeed(`Routed ${cmd} to ${targetId} via control_ws`);
+        setCommandStatus(targetId, cmd, 'sent');
+        pushHistory(targetId, {
+          id: `${targetId}-${cmd}-${Date.now()}`,
+          cmd,
+          status: 'sent',
+          detail: 'control_ws',
+          ts: Date.now()
+        });
         return;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         addFeed(`Control WS send failed for ${cmd}: ${message}; trying HTTP fallback...`);
+        pushToast('error', `WS send failed for ${cmd}`, targetId);
       }
     }
     if (ws && ws.readyState === WebSocket.CONNECTING) {
@@ -126,6 +248,14 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
         cmd,
         targetId,
         extra
+      });
+      setCommandStatus(targetId, cmd, 'queued');
+      pushHistory(targetId, {
+        id: `${targetId}-${cmd}-${Date.now()}`,
+        cmd,
+        status: 'queued',
+        detail: 'control_ws',
+        ts: Date.now()
       });
       addFeed(`Queued ${cmd} for ${targetId} (control_ws connecting)`);
       return;
@@ -151,11 +281,28 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
         throw new Error(result.error || result.message || `HTTP ${res.status}`);
       }
       addFeed(`Routed ${cmd} to ${targetId} via ${result.status || 'ok'}`);
+      setCommandStatus(targetId, cmd, 'sent');
+      pushHistory(targetId, {
+        id: `${targetId}-${cmd}-${Date.now()}`,
+        cmd,
+        status: 'sent',
+        detail: 'http',
+        ts: Date.now()
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       addFeed(`Failed to send ${cmd}: ${message}`);
+      setCommandStatus(targetId, cmd, 'error');
+      pushHistory(targetId, {
+        id: `${targetId}-${cmd}-${Date.now()}`,
+        cmd,
+        status: 'error',
+        detail: message,
+        ts: Date.now()
+      });
+      pushToast('error', `Failed to send ${cmd}`, targetId);
     }
-  }, [addFeed]);
+  }, [addFeed, pushHistory, pushToast, setCommandStatus]);
   const onAudioDataRef = useRef(onAudioData);
   const onWebRTCMessageRef = useRef(onWebRTCMessage);
   const onCameraFrameRef = useRef(onCameraFrame);
@@ -169,6 +316,7 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
     const connect = () => {
       setWsState('connecting');
       setIsColdStarting(false);
+      setWsReconnectAt(null);
       if (coldStartTimerRef.current) {
         window.clearTimeout(coldStartTimerRef.current);
       }
@@ -184,6 +332,7 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
       ws.addEventListener('open', () => {
         setWsState('open');
         setIsColdStarting(false);
+        setWsReconnectAt(null);
         if (coldStartTimerRef.current) window.clearTimeout(coldStartTimerRef.current);
         addFeed('Control WebSocket connected');
         if (pendingWsCommandsRef.current.length > 0) {
@@ -207,6 +356,7 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
         }
       });
       ws.addEventListener('message', event => {
+        lastWsMessageAtRef.current = Date.now();
         // Handle binary data
         if (event.data instanceof ArrayBuffer) {
           const view = new DataView(event.data);
@@ -275,7 +425,7 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
           const type = String(msg.type || '');
           if (type === 'device_list' && Array.isArray(msg.devices)) {
             const list = msg.devices;
-            setDevices(list);
+            mergeDeviceList(list);
             if (list[0]?.deviceId) {
               setSelectedDeviceId(prev => prev || list[0].deviceId);
             }
@@ -311,6 +461,18 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
             upsertDevice({
               deviceId,
               health: msg.health || {}
+            });
+            return;
+          }
+          if (type === 'gain_ack') {
+            const deviceId = String(msg.deviceId || selectedDeviceIdRef.current || '');
+            const level = Number(msg.level);
+            if (!deviceId || !Number.isFinite(level)) return;
+            upsertDevice({
+              deviceId,
+              health: {
+                gainLevel: level
+              }
             });
             return;
           }
@@ -421,6 +583,16 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
             const route = String(msg.route || 'queue');
             const prefix = msg.deviceId ? `${String(msg.deviceId).substring(0, 8)}:` : '';
             addFeed(`⏳ PENDING ${prefix} ${cmd} via ${route}`);
+            if (msg.deviceId && cmd) {
+              setCommandStatus(String(msg.deviceId), cmd, 'queued');
+              pushHistory(String(msg.deviceId), {
+                id: `${String(msg.deviceId)}-${cmd}-${Date.now()}`,
+                cmd,
+                status: 'queued',
+                detail: route,
+                ts: Date.now()
+              });
+            }
             return;
           }
           if (type === 'command_dispatch') {
@@ -428,6 +600,16 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
             const status = String(msg.status || 'queued');
             const prefix = msg.deviceId ? `${String(msg.deviceId).substring(0, 8)}:` : '';
             addFeed(`🚀 DISPATCH ${prefix} ${cmd} (${status})`);
+            if (msg.deviceId && cmd) {
+              setCommandStatus(String(msg.deviceId), cmd, status === 'sent' ? 'sent' : 'queued');
+              pushHistory(String(msg.deviceId), {
+                id: `${String(msg.deviceId)}-${cmd}-${Date.now()}`,
+                cmd,
+                status: status === 'sent' ? 'sent' : 'queued',
+                detail: msg.route ? String(msg.route) : '',
+                ts: Date.now()
+              });
+            }
             return;
           }
 
@@ -438,6 +620,57 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
             const detail = msg.detail ? ` - ${msg.detail}` : '';
             const prefix = msg.deviceId ? `${String(msg.deviceId).substring(0, 8)}:` : '';
             addFeed(`📢 CMD ${prefix} ${cmd} (${status})${detail}`);
+            if (msg.deviceId && cmd) {
+              if (status === 'success') {
+                setCommandStatus(String(msg.deviceId), cmd, null);
+              } else {
+                setCommandStatus(String(msg.deviceId), cmd, 'error');
+              }
+              pushHistory(String(msg.deviceId), {
+                id: `${String(msg.deviceId)}-${cmd}-${Date.now()}`,
+                cmd,
+                status: status === 'success' ? 'ack' : 'error',
+                detail: msg.detail ? String(msg.detail) : '',
+                ts: Date.now()
+              });
+              pushToast(status === 'success' ? 'success' : 'error', `${cmd} ${status === 'success' ? 'acknowledged' : 'failed'}`, String(msg.deviceId));
+            }
+            if (msg.deviceId && cmd === 'voice_profile' && msg.detail) {
+              upsertDevice({
+                deviceId: String(msg.deviceId),
+                health: {
+                  voiceProfile: String(msg.detail)
+                }
+              });
+            }
+            if (msg.deviceId && cmd === 'photo_night' && msg.detail) {
+              upsertDevice({
+                deviceId: String(msg.deviceId),
+                health: {
+                  photoNight: String(msg.detail)
+                }
+              });
+            }
+            if (msg.deviceId && cmd === 'photo_quality' && msg.detail) {
+              upsertDevice({
+                deviceId: String(msg.deviceId),
+                health: {
+                  photoQuality: String(msg.detail)
+                }
+              });
+            }
+            if (msg.deviceId && cmd === 'set_gain') {
+              const match = String(msg.detail || '').match(/([0-9.]+)/);
+              const level = match ? Number(match[1]) : NaN;
+              if (Number.isFinite(level)) {
+                upsertDevice({
+                  deviceId: String(msg.deviceId),
+                  health: {
+                    gainLevel: level
+                  }
+                });
+              }
+            }
             if (cmd.startsWith('webrtc_') && onWebRTCMessageRef.current) {
               onWebRTCMessageRef.current(msg);
             }
@@ -473,21 +706,24 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
       ws.addEventListener('close', () => {
         setWsState('closed');
         setIsColdStarting(false);
+        setWsReconnectAt(Date.now() + 3000);
         if (coldStartTimerRef.current) window.clearTimeout(coldStartTimerRef.current);
         if (stopped) return;
         addFeed('Control WebSocket disconnected, retrying...');
         reconnectTimerRef.current = window.setTimeout(connect, 3000);
       });
     };
+    connectRef.current = connect;
     connect();
     return () => {
       stopped = true;
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
       }
+      connectRef.current = null;
       wsRef.current?.close();
     };
-  }, [addFeed, removeDevice, loadPhotos, upsertDevice]);
+  }, [addFeed, pushHistory, pushToast, removeDevice, loadPhotos, upsertDevice, mergeDeviceList, setCommandStatus]);
   useEffect(() => {
     let stopped = false;
     const loadHealth = async () => {
@@ -512,6 +748,32 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
   }, []);
 
   useEffect(() => {
+    let stopped = false;
+    const loadDevices = async () => {
+      if (wsState === 'open' && Date.now() - lastWsMessageAtRef.current < 20000) return;
+      try {
+        const res = await fetch(apiUrl('/api/devices'));
+        if (!res.ok) return;
+        const json = await res.json();
+        if (!stopped && Array.isArray(json.devices)) {
+          mergeDeviceList(json.devices);
+          if (json.devices[0]?.deviceId) {
+            setSelectedDeviceId(prev => prev || json.devices[0].deviceId);
+          }
+        }
+      } catch {
+        // Best-effort polling fallback.
+      }
+    };
+    loadDevices();
+    const id = window.setInterval(loadDevices, 15000);
+    return () => {
+      stopped = true;
+      clearInterval(id);
+    };
+  }, [mergeDeviceList, setSelectedDeviceId, wsState]);
+
+  useEffect(() => {
     void loadPhotos(selectedDeviceId || undefined);
   }, [loadPhotos, selectedDeviceId]);
   useEffect(() => {
@@ -531,9 +793,14 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
     serverHealth,
     feed,
     photos,
+    pendingCommands,
+    toasts,
+    commandHistory,
+    wsReconnectAt,
 
     setSelectedDeviceId,
     sendCommand,
+    reconnectNow,
     // Expose the underlying control WebSocket instance (may be null until connected)
     ws: wsRef.current
   };
