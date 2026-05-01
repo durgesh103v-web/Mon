@@ -52,6 +52,8 @@ function requestFileStream({ deviceId, path, rangeStart, rangeEnd, res }) {
     cleanupRequest(requestId);
   });
 
+  console.log("Sending file_stream_start:", { deviceId, requestId, path });
+
   const sent = sendJsonToDevice(deviceId, {
     type: "file_stream_start",
     requestId,

