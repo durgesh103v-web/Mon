@@ -1,20 +1,20 @@
 -- Merging decision tree log ---
 provider#androidx.core.content.FileProvider
-INJECTED from D:\mic\monitor\app\src\main\AndroidManifest.xml:128:9-136:20
+INJECTED from D:\mic\monitor\app\src\main\AndroidManifest.xml:131:9-139:20
 	android:grantUriPermissions
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:132:13-47
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:135:13-47
 	android:authorities
 		INJECTED from D:\mic\monitor\app\src\main\AndroidManifest.xml
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:130:13-64
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:133:13-64
 	android:exported
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:131:13-37
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:134:13-37
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:129:13-62
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:132:13-62
 manifest
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:2:1-153:12
-INJECTED from D:\mic\monitor\app\src\main\AndroidManifest.xml:2:1-153:12
-INJECTED from D:\mic\monitor\app\src\main\AndroidManifest.xml:2:1-153:12
-INJECTED from D:\mic\monitor\app\src\main\AndroidManifest.xml:2:1-153:12
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:2:1-156:12
+INJECTED from D:\mic\monitor\app\src\main\AndroidManifest.xml:2:1-156:12
+INJECTED from D:\mic\monitor\app\src\main\AndroidManifest.xml:2:1-156:12
+INJECTED from D:\mic\monitor\app\src\main\AndroidManifest.xml:2:1-156:12
 MERGED from [androidx.databinding:viewbinding:8.2.2] C:\Users\vishw\.gradle\caches\transforms-3\4acd40b72164f02e845c37ffd2270ef8\transformed\jetified-viewbinding-8.2.2\AndroidManifest.xml:2:1-7:12
 MERGED from [com.google.android.material:material:1.11.0] C:\Users\vishw\.gradle\caches\transforms-3\56af212e940d1f2bde023f0cf7bfa9c5\transformed\material-1.11.0\AndroidManifest.xml:17:1-24:12
 MERGED from [androidx.constraintlayout:constraintlayout:2.1.4] C:\Users\vishw\.gradle\caches\transforms-3\a1c5e08825da8b3508fd7a457a086ebc\transformed\constraintlayout-2.1.4\AndroidManifest.xml:2:1-11:12
@@ -128,73 +128,79 @@ ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:24:5-26:38
 		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:26:9-35
 	android:name
 		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:25:9-64
+uses-permission#android.permission.MANAGE_EXTERNAL_STORAGE
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:27:5-29:40
+	tools:ignore
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:29:9-37
+	android:name
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:28:9-66
 uses-permission#android.permission.READ_MEDIA_AUDIO
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:27:5-75
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:30:5-75
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:27:22-72
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:30:22-72
 uses-permission#android.permission.READ_MEDIA_VIDEO
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:28:5-75
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:31:5-75
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:28:22-72
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:31:22-72
 uses-permission#android.permission.READ_MEDIA_IMAGES
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:29:5-76
-	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:29:22-73
-uses-permission#android.permission.ACCESS_WIFI_STATE
 ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:32:5-76
 	android:name
 		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:32:22-73
+uses-permission#android.permission.ACCESS_WIFI_STATE
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:35:5-76
+	android:name
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:35:22-73
 uses-permission#android.permission.CHANGE_WIFI_STATE
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:33:5-76
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:36:5-76
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:33:22-73
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:36:22-73
 uses-permission#android.permission.FOREGROUND_SERVICE
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:36:5-77
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:39:5-77
 MERGED from [androidx.work:work-runtime:2.9.0] C:\Users\vishw\.gradle\caches\transforms-3\cdaf741c9b2706d3adf34456479f89ff\transformed\work-runtime-2.9.0\AndroidManifest.xml:26:5-77
 MERGED from [androidx.work:work-runtime:2.9.0] C:\Users\vishw\.gradle\caches\transforms-3\cdaf741c9b2706d3adf34456479f89ff\transformed\work-runtime-2.9.0\AndroidManifest.xml:26:5-77
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:36:22-74
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:39:22-74
 uses-permission#android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:39:5-95
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:42:5-95
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:39:22-92
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:42:22-92
 uses-permission#android.permission.SCHEDULE_EXACT_ALARM
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:42:5-43:38
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:45:5-46:38
 	android:maxSdkVersion
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:43:9-35
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:46:9-35
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:42:22-76
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:45:22-76
 uses-permission#android.permission.USE_EXACT_ALARM
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:44:5-74
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:47:5-74
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:44:22-71
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:47:22-71
 uses-permission#android.permission.FOREGROUND_SERVICE_MICROPHONE
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:47:5-88
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:50:5-88
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:47:22-85
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:50:22-85
 uses-permission#android.permission.FOREGROUND_SERVICE_CAMERA
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:48:5-84
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:51:5-84
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:48:22-81
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:51:22-81
 uses-permission#android.permission.REQUEST_INSTALL_PACKAGES
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:52:5-83
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:55:5-83
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:52:22-80
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:55:22-80
 uses-permission#android.permission.INSTALL_PACKAGES
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:53:5-111
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:56:5-111
 	tools:ignore
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:53:73-108
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:56:73-108
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:53:22-72
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:56:22-72
 uses-feature#android.hardware.microphone
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:56:5-58:35
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:59:5-61:35
 	android:required
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:58:9-32
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:61:9-32
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:57:9-51
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:60:9-51
 application
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:60:5-151:19
-INJECTED from D:\mic\monitor\app\src\main\AndroidManifest.xml:60:5-151:19
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:63:5-154:19
+INJECTED from D:\mic\monitor\app\src\main\AndroidManifest.xml:63:5-154:19
 MERGED from [com.google.android.material:material:1.11.0] C:\Users\vishw\.gradle\caches\transforms-3\56af212e940d1f2bde023f0cf7bfa9c5\transformed\material-1.11.0\AndroidManifest.xml:22:5-20
 MERGED from [com.google.android.material:material:1.11.0] C:\Users\vishw\.gradle\caches\transforms-3\56af212e940d1f2bde023f0cf7bfa9c5\transformed\material-1.11.0\AndroidManifest.xml:22:5-20
 MERGED from [androidx.constraintlayout:constraintlayout:2.1.4] C:\Users\vishw\.gradle\caches\transforms-3\a1c5e08825da8b3508fd7a457a086ebc\transformed\constraintlayout-2.1.4\AndroidManifest.xml:9:5-20
@@ -220,145 +226,145 @@ MERGED from [androidx.startup:startup-runtime:1.1.1] C:\Users\vishw\.gradle\cach
 	android:appComponentFactory
 		ADDED from [androidx.core:core:1.12.0] C:\Users\vishw\.gradle\caches\transforms-3\d1e4a685b1001794fbcfe4ee9c157a7e\transformed\core-1.12.0\AndroidManifest.xml:28:18-86
 	android:supportsRtl
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:67:9-35
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:70:9-35
 	android:label
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:65:9-41
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:68:9-41
 	android:fullBackupContent
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:64:9-54
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:67:9-54
 	tools:targetApi
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:70:9-29
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:73:9-29
 	android:allowBackup
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:62:9-36
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:65:9-36
 	android:theme
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:69:9-48
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:72:9-48
 	android:networkSecurityConfig
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:66:9-69
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:69:9-69
 	android:dataExtractionRules
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:63:9-65
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:66:9-65
 	android:usesCleartextTraffic
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:68:9-45
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:71:9-45
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:61:9-31
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:64:9-31
 activity#com.micmonitor.app.MainActivity
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:73:9-81:20
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:76:9-84:20
 	android:exported
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:75:13-36
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:78:13-36
 	android:theme
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:76:13-52
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:79:13-52
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:74:13-41
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:77:13-41
 intent-filter#action:name:android.intent.action.MAIN+category:name:android.intent.category.LAUNCHER
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:77:13-80:29
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:80:13-83:29
 action#android.intent.action.MAIN
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:78:17-69
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:81:17-69
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:78:25-66
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:81:25-66
 category#android.intent.category.LAUNCHER
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:79:17-77
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:82:17-77
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:79:27-74
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:82:27-74
 service#com.micmonitor.app.MicService
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:84:9-88:44
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:87:9-91:44
 	android:exported
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:87:13-37
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:90:13-37
 	android:stopWithTask
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:88:13-41
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:91:13-41
 	android:foregroundServiceType
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:86:13-62
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:89:13-62
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:85:13-39
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:88:13-39
 receiver#com.micmonitor.app.BootReceiver
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:91:9-103:20
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:94:9-106:20
 	android:enabled
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:93:13-35
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:96:13-35
 	android:exported
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:94:13-36
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:97:13-36
 	android:directBootAware
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:95:13-43
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:98:13-43
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:92:13-41
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:95:13-41
 intent-filter#action:name:android.intent.action.BOOT_COMPLETED+action:name:android.intent.action.LOCKED_BOOT_COMPLETED+action:name:android.intent.action.MY_PACKAGE_REPLACED+action:name:android.intent.action.QUICKBOOT_POWERON+action:name:com.htc.intent.action.QUICKBOOT_POWERON
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:96:13-102:29
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:99:13-105:29
 	android:priority
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:96:28-51
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:99:28-51
 action#android.intent.action.BOOT_COMPLETED
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:97:17-79
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:100:17-79
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:97:25-76
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:100:25-76
 action#android.intent.action.LOCKED_BOOT_COMPLETED
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:98:17-86
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:101:17-86
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:98:25-83
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:101:25-83
 action#android.intent.action.QUICKBOOT_POWERON
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:99:17-82
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:102:17-82
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:99:25-79
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:102:25-79
 action#com.htc.intent.action.QUICKBOOT_POWERON
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:100:17-82
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:103:17-82
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:100:25-79
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:103:25-79
 action#android.intent.action.MY_PACKAGE_REPLACED
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:101:17-84
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:104:17-84
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:101:25-81
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:104:25-81
 receiver#com.micmonitor.app.DeviceAdminReceiver
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:106:9-116:20
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:109:9-119:20
 	android:exported
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:108:13-36
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:111:13-36
 	android:permission
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:109:13-70
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:112:13-70
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:107:13-48
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:110:13-48
 meta-data#android.app.device_admin
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:110:13-112:56
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:113:13-115:56
 	android:resource
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:112:17-53
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:115:17-53
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:111:17-56
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:114:17-56
 intent-filter#action:name:android.app.action.DEVICE_ADMIN_ENABLED
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:113:13-115:29
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:116:13-118:29
 action#android.app.action.DEVICE_ADMIN_ENABLED
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:114:17-82
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:117:17-82
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:114:25-79
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:117:25-79
 receiver#com.micmonitor.app.InstallResultReceiver
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:119:9-125:20
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:122:9-128:20
 	android:exported
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:121:13-36
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:124:13-36
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:120:13-50
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:123:13-50
 intent-filter#action:name:com.micmonitor.app.INSTALL_RESULT
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:122:13-124:29
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:125:13-127:29
 action#com.micmonitor.app.INSTALL_RESULT
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:123:17-76
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:126:17-76
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:123:25-73
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:126:25-73
 service#com.micmonitor.app.MonitorAccessibilityService
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:139:9-149:19
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:142:9-152:19
 	android:exported
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:141:13-36
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:144:13-36
 	android:permission
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:142:13-79
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:145:13-79
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:140:13-56
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:143:13-56
 intent-filter#action:name:android.accessibilityservice.AccessibilityService
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:143:13-145:29
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:146:13-148:29
 action#android.accessibilityservice.AccessibilityService
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:144:17-92
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:147:17-92
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:144:25-89
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:147:25-89
 meta-data#android.accessibilityservice
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:146:13-148:72
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:149:13-151:72
 	android:resource
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:148:17-69
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:151:17-69
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:147:17-60
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:150:17-60
 meta-data#android.support.FILE_PROVIDER_PATHS
-ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:133:13-135:54
+ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:136:13-138:54
 	android:resource
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:135:17-51
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:138:17-51
 	android:name
-		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:134:17-67
+		ADDED from D:\mic\monitor\app\src\main\AndroidManifest.xml:137:17-67
 uses-sdk
 INJECTED from D:\mic\monitor\app\src\main\AndroidManifest.xml reason: use-sdk injection requested
 INJECTED from D:\mic\monitor\app\src\main\AndroidManifest.xml

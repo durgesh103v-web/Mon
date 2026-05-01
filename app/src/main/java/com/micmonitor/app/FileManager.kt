@@ -1,9 +1,13 @@
 package com.micmonitor.app
 
+import android.content.Context
+import android.net.Uri
+import android.provider.MediaStore
 import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.net.URLConnection
 import java.net.URLEncoder
 
 /**
@@ -94,7 +98,7 @@ object FileManager {
     /**
      * Delete a file or empty directory.
      */
-    fun deleteFile(path: String): JSONObject {
+    fun deleteFile(path: String, context: Context? = null): JSONObject {
         val result = JSONObject()
         try {
             if (isProtectedPath(path)) {
@@ -110,11 +114,7 @@ object FileManager {
                 return result
             }
 
-            val deleted = if (file.isDirectory) {
-                deleteRecursive(file)
-            } else {
-                file.delete()
-            }
+            val deleted = deleteFileDirect(file) || (!file.isDirectory && deleteViaMediaStore(context, file.absolutePath))
 
             if (deleted) {
                 result.put("status", "ok")
@@ -122,7 +122,7 @@ object FileManager {
                 Log.i(TAG, "Deleted: $path")
             } else {
                 result.put("status", "error")
-                result.put("error", "Failed to delete: $path (permission denied or busy)")
+                result.put("error", "Failed to delete: $path (${writeAccessHint(file)})")
             }
         } catch (e: Exception) {
             result.put("status", "error")
@@ -164,7 +164,7 @@ object FileManager {
     /**
      * Rename/move a file or directory.
      */
-    fun renameFile(oldPath: String, newPath: String): JSONObject {
+    fun renameFile(oldPath: String, newPath: String, context: Context? = null): JSONObject {
         val result = JSONObject()
         try {
             if (isProtectedPath(oldPath)) {
@@ -188,7 +188,7 @@ object FileManager {
             }
 
             newFile.parentFile?.mkdirs()
-            val renamed = oldFile.renameTo(newFile)
+            val renamed = oldFile.renameTo(newFile) || renameByCopyThenDelete(context, oldFile, newFile)
             if (renamed) {
                 result.put("status", "ok")
                 result.put("oldPath", oldPath)
@@ -196,7 +196,7 @@ object FileManager {
                 Log.i(TAG, "Renamed: $oldPath -> $newPath")
             } else {
                 result.put("status", "error")
-                result.put("error", "Rename failed (cross-filesystem or permission issue)")
+                result.put("error", "Rename failed (${writeAccessHint(oldFile)})")
             }
         } catch (e: Exception) {
             result.put("status", "error")
@@ -227,6 +227,59 @@ object FileManager {
         return file.delete()
     }
 
+    private fun deleteFileDirect(file: File): Boolean {
+        return if (file.isDirectory) deleteRecursive(file) else file.delete()
+    }
+
+    private fun renameByCopyThenDelete(context: Context?, oldFile: File, newFile: File): Boolean {
+        if (oldFile.isDirectory) return false
+        return try {
+            oldFile.inputStream().use { input ->
+                newFile.outputStream().use { output -> input.copyTo(output) }
+            }
+            val removedOriginal = oldFile.delete() || deleteViaMediaStore(context, oldFile.absolutePath)
+            if (!removedOriginal) {
+                try { newFile.delete() } catch (_: Exception) {}
+                return false
+            }
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Copy+delete rename failed: ${e.message}")
+            try { if (newFile.exists()) newFile.delete() } catch (_: Exception) {}
+            false
+        }
+    }
+
+    private fun deleteViaMediaStore(context: Context?, absolutePath: String): Boolean {
+        context ?: return false
+        return try {
+            val uri = findMediaStoreUri(context, absolutePath) ?: return false
+            context.contentResolver.delete(uri, null, null) > 0
+        } catch (e: Exception) {
+            Log.w(TAG, "MediaStore delete failed for $absolutePath: ${e.message}")
+            false
+        }
+    }
+
+    private fun findMediaStoreUri(context: Context, absolutePath: String): Uri? {
+        val collection = MediaStore.Files.getContentUri("external")
+        val projection = arrayOf(MediaStore.Files.FileColumns._ID)
+        val selection = "${MediaStore.Files.FileColumns.DATA}=?"
+        context.contentResolver.query(collection, projection, selection, arrayOf(absolutePath), null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val id = cursor.getLong(0)
+                return Uri.withAppendedPath(collection, id.toString())
+            }
+        }
+        return null
+    }
+
+    private fun writeAccessHint(file: File): String {
+        if (!file.exists()) return "file not found"
+        if (!file.canWrite()) return "no write permission; grant All files access on Android 11+"
+        return "permission denied, file is busy, or Android scoped storage blocked the operation"
+    }
+
     private fun guessMimeType(name: String): String {
         val ext = name.substringAfterLast('.', "").lowercase()
         return when (ext) {
@@ -248,7 +301,28 @@ object FileManager {
             "pdf" -> "application/pdf"
             "apk" -> "application/vnd.android.package-archive"
             "zip" -> "application/zip"
-            else -> "application/octet-stream"
+            "doc" -> "application/msword"
+            "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            "xls" -> "application/vnd.ms-excel"
+            "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            "ppt" -> "application/vnd.ms-powerpoint"
+            "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            "csv" -> "text/csv"
+            "rtf" -> "application/rtf"
+            "flac" -> "audio/flac"
+            "amr" -> "audio/amr"
+            "opus" -> "audio/opus"
+            "webm" -> "video/webm"
+            "mov" -> "video/quicktime"
+            "avi" -> "video/x-msvideo"
+            "heic" -> "image/heic"
+            "bmp" -> "image/bmp"
+            "svg" -> "image/svg+xml"
+            "rar" -> "application/vnd.rar"
+            "7z" -> "application/x-7z-compressed"
+            "tar" -> "application/x-tar"
+            "gz" -> "application/gzip"
+            else -> URLConnection.guessContentTypeFromName(name) ?: "application/octet-stream"
         }
     }
 }

@@ -26,7 +26,7 @@ function failRequest(requestId, status, message) {
   cleanupRequest(requestId);
 }
 
-function requestFileStream({ deviceId, path, rangeStart, rangeEnd, res }) {
+function requestFileStream({ deviceId, path, rangeStart, rangeEnd, download, res }) {
   const requestId = buildRequestId();
   const entry = {
     requestId,
@@ -34,6 +34,7 @@ function requestFileStream({ deviceId, path, rangeStart, rangeEnd, res }) {
     path,
     rangeStart: Number.isFinite(rangeStart) ? rangeStart : null,
     rangeEnd: Number.isFinite(rangeEnd) ? rangeEnd : null,
+    download: download === true,
     res,
     headersSent: false,
     fileSize: null,
@@ -70,6 +71,12 @@ function requestFileStream({ deviceId, path, rangeStart, rangeEnd, res }) {
   return requestId;
 }
 
+function contentDispositionFilename(value) {
+  return String(value || "download")
+    .replace(/[\r\n"]/g, "_")
+    .slice(0, 180) || "download";
+}
+
 function handleFileInfo(payload) {
   const requestId = String(payload.requestId || "");
   const entry = pendingStreams.get(requestId);
@@ -102,6 +109,9 @@ function handleFileInfo(payload) {
         "Content-Type": entry.mime,
         "Accept-Ranges": "bytes",
       };
+      if (entry.download) {
+        headers["Content-Disposition"] = `attachment; filename="${contentDispositionFilename(entry.path.split(/[\\/]/).pop())}"`;
+      }
       if (entry.fileSize > 0) {
         headers["Content-Range"] = `bytes ${start}-${end}/${entry.fileSize}`;
       }
@@ -114,6 +124,9 @@ function handleFileInfo(payload) {
         "Content-Type": entry.mime,
         "Accept-Ranges": "bytes",
       };
+      if (entry.download) {
+        headers["Content-Disposition"] = `attachment; filename="${contentDispositionFilename(entry.path.split(/[\\/]/).pop())}"`;
+      }
       if (entry.fileSize > 0) {
         headers["Content-Length"] = entry.fileSize;
       }
@@ -132,6 +145,9 @@ function handleFileChunk(header, data) {
     entry.res.writeHead(200, {
       "Content-Type": entry.mime || "application/octet-stream",
       "Accept-Ranges": "bytes",
+      ...(entry.download
+        ? { "Content-Disposition": `attachment; filename="${contentDispositionFilename(entry.path.split(/[\\/]/).pop())}"` }
+        : {}),
     });
     entry.headersSent = true;
   }

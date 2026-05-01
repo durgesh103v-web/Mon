@@ -32,6 +32,7 @@ function registerMediaRoutes(app) {
       path: decodedPath,
       rangeStart,
       rangeEnd,
+      download: String(req.query.download || "") === "1",
       res,
     });
 

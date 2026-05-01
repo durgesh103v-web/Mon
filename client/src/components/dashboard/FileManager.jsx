@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { apiUrl } from '../../lib/helpers';
 
+const pathStorageKey = deviceId => `micmonitor:fileManagerPath:${deviceId}`;
+
 // Helper: Format bytes to human readable string
 const formatBytes = (bytes, decimals = 2) => {
   if (!+bytes) return '0 B';
@@ -23,6 +25,22 @@ const formatDate = (ts) => {
   });
 };
 
+const extensionOf = name => String(name || '').split('.').pop()?.toLowerCase() || '';
+
+const fileIconFor = item => {
+  if (item.isDir) return '📁';
+  const ext = extensionOf(item.name);
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'bmp', 'svg'].includes(ext)) return '🖼️';
+  if (['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'amr', 'opus'].includes(ext)) return '🎵';
+  if (['mp4', 'mkv', '3gp', 'webm', 'avi', 'mov'].includes(ext)) return '🎬';
+  if (ext === 'pdf') return '📕';
+  if (['doc', 'docx', 'rtf', 'odt'].includes(ext)) return '📝';
+  if (['xls', 'xlsx', 'csv', 'ods'].includes(ext)) return '📊';
+  if (['ppt', 'pptx', 'odp'].includes(ext)) return '📽️';
+  if (['zip', 'rar', '7z', 'tar', 'gz', 'apk'].includes(ext)) return '📦';
+  return '📄';
+};
+
 export function FileManager({
   deviceId,
   isConnected,
@@ -30,7 +48,13 @@ export function FileManager({
   fileManagerData,
   pendingCommands
 }) {
-  const [currentPath, setCurrentPath] = useState('/storage/emulated/0/');
+  const [currentPath, setCurrentPath] = useState(() => {
+    try {
+      return window.localStorage.getItem(pathStorageKey(deviceId)) || '/storage/emulated/0/';
+    } catch {
+      return '/storage/emulated/0/';
+    }
+  });
   const [history, setHistory] = useState([]);
   const [items, setItems] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -41,6 +65,11 @@ export function FileManager({
   
   // Refs for tracking mutable transfer state
   const pendingPathRef = useRef(null);
+  const currentPathRef = useRef(currentPath);
+
+  useEffect(() => {
+    currentPathRef.current = currentPath;
+  }, [currentPath]);
 
   // Request files for a path
   const loadPath = useCallback((path) => {
@@ -51,12 +80,23 @@ export function FileManager({
     onCommand('list_files', { path });
   }, [deviceId, isConnected, onCommand]);
 
-  // Initial load
   useEffect(() => {
-    if (deviceId && isConnected) {
-      loadPath(currentPath);
+    let nextPath = '/storage/emulated/0/';
+    try {
+      const saved = window.localStorage.getItem(pathStorageKey(deviceId));
+      nextPath = saved || nextPath;
+    } catch {
+      nextPath = '/storage/emulated/0/';
     }
-  }, [deviceId, isConnected]);
+    setCurrentPath(nextPath);
+    currentPathRef.current = nextPath;
+    setHistory([]);
+    setItems([]);
+    pendingPathRef.current = null;
+    if (deviceId && isConnected) {
+      loadPath(nextPath);
+    }
+  }, [deviceId, isConnected, loadPath]);
 
   // Handle incoming data
   useEffect(() => {
@@ -73,6 +113,11 @@ export function FileManager({
     if (action === 'list_files') {
       const newPath = fileManagerData.path || '/';
       setItems(fileManagerData.items || []);
+      try {
+        window.localStorage.setItem(pathStorageKey(deviceId), newPath);
+      } catch {
+        // Storage is best-effort only.
+      }
       
       if (currentPath !== newPath && !history.includes(newPath)) {
          if (pendingPathRef.current === newPath) {
@@ -105,10 +150,10 @@ export function FileManager({
   };
 
   // Action handlers
-  const handleOpenFile = (item, mode = 'download') => {
+  const buildFileUrl = (item, mode = 'open') => {
     if (!item?.path || !deviceId) {
       setError('Missing device or file path. Refresh the list and try again.');
-      return;
+      return null;
     }
     const encodedPath = encodeURIComponent(item.path);
     let url = apiUrl(`/file?deviceId=${encodeURIComponent(deviceId)}&path=${encodedPath}`);
@@ -116,11 +161,27 @@ export function FileManager({
     if (token) {
       const urlObj = new URL(url, window.location.origin);
       urlObj.searchParams.set('token', token);
+      if (mode === 'download') urlObj.searchParams.set('download', '1');
+      url = urlObj.toString();
+    } else if (mode === 'download') {
+      const urlObj = new URL(url, window.location.origin);
+      urlObj.searchParams.set('download', '1');
       url = urlObj.toString();
     }
+    return url;
+  };
+
+  const handleOpenFile = (item, mode = 'open') => {
+    const url = buildFileUrl(item, mode);
+    if (!url) return;
     const link = document.createElement('a');
     link.href = url;
-    link.download = item?.name || 'download';
+    if (mode === 'download') {
+      link.download = item?.name || 'download';
+    } else {
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+    }
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -306,17 +367,17 @@ export function FileManager({
                         onClick={() => {
                           if (!item.canRead) return;
                           if (item.isDir) handleNavigate(item.path);
-                          else handleOpenFile(item);
+                          else handleOpenFile(item, 'open');
                         }}
                       >
-                        {item.isDir ? '📁' : '📄'}
+                        {fileIconFor(item)}
                       </td>
                       <td 
                         className={`px-4 py-2 cursor-pointer font-medium truncate max-w-[200px] ${item.isDir ? 'text-zinc-200' : 'text-zinc-400'}`}
                         onClick={() => {
                           if (!item.canRead) return;
                           if (item.isDir) handleNavigate(item.path);
-                          else handleOpenFile(item);
+                          else handleOpenFile(item, 'open');
                         }}
                         title={item.name}
                       >
@@ -339,9 +400,9 @@ export function FileManager({
                         <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           {!item.isDir && (
                             <button 
-                              onClick={(e) => { e.stopPropagation(); handleOpenFile(item, 'download'); }}
+                              onClick={(e) => { e.stopPropagation(); handleOpenFile(item, 'open'); }}
                               className="p-1.5 bg-zinc-800 hover:bg-cyan-900/50 text-zinc-300 hover:text-cyan-400 rounded transition-colors"
-                              title="Download"
+                              title="Open in new tab"
                             >
                               🔗
                             </button>

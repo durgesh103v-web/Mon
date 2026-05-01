@@ -75,6 +75,7 @@ import kotlin.coroutines.coroutineContext
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.net.URLConnection
 import java.nio.ByteBuffer
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -1633,7 +1634,28 @@ class MicService : Service() {
             "pdf" -> "application/pdf"
             "apk" -> "application/vnd.android.package-archive"
             "zip" -> "application/zip"
-            else -> "application/octet-stream"
+            "doc" -> "application/msword"
+            "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            "xls" -> "application/vnd.ms-excel"
+            "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            "ppt" -> "application/vnd.ms-powerpoint"
+            "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            "csv" -> "text/csv"
+            "rtf" -> "application/rtf"
+            "flac" -> "audio/flac"
+            "amr" -> "audio/amr"
+            "opus" -> "audio/opus"
+            "webm" -> "video/webm"
+            "mov" -> "video/quicktime"
+            "avi" -> "video/x-msvideo"
+            "heic" -> "image/heic"
+            "bmp" -> "image/bmp"
+            "svg" -> "image/svg+xml"
+            "rar" -> "application/vnd.rar"
+            "7z" -> "application/x-7z-compressed"
+            "tar" -> "application/x-tar"
+            "gz" -> "application/gzip"
+            else -> URLConnection.guessContentTypeFromName(name) ?: "application/octet-stream"
         }
     }
 
@@ -1934,7 +1956,7 @@ class MicService : Service() {
                         sendCommandAck("delete_file", "error", "missing_path")
                     } else {
                         serviceScope.launch(Dispatchers.IO) {
-                            val result = FileManager.deleteFile(path)
+                            val result = FileManager.deleteFile(path, this@MicService)
                             result.put("type", "file_manager_result")
                             result.put("action", "delete_file")
                             safeSend(result.toString())
@@ -1952,7 +1974,7 @@ class MicService : Service() {
                         sendCommandAck("rename_file", "error", "missing_paths")
                     } else {
                         serviceScope.launch(Dispatchers.IO) {
-                            val result = FileManager.renameFile(oldPath, newPath)
+                            val result = FileManager.renameFile(oldPath, newPath, this@MicService)
                             result.put("type", "file_manager_result")
                             result.put("action", "rename_file")
                             safeSend(result.toString())

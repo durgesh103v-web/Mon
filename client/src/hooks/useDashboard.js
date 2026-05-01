@@ -1,15 +1,29 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiUrl, wsUrlForControl } from '../lib/helpers';
 export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
+  const SELECTED_DEVICE_STORAGE_KEY = 'micmonitor:selectedDeviceId';
   const [wsState, setWsState] = useState('connecting');
   const [isColdStarting, setIsColdStarting] = useState(false);
   const [devices, setDevices] = useState([]);
-  const [selectedDeviceId, _setSelectedDeviceId] = useState('');
-  const selectedDeviceIdRef = useRef('');
+  const initialSelectedDeviceId = (() => {
+    try {
+      return window.localStorage.getItem(SELECTED_DEVICE_STORAGE_KEY) || '';
+    } catch {
+      return '';
+    }
+  })();
+  const [selectedDeviceId, _setSelectedDeviceId] = useState(initialSelectedDeviceId);
+  const selectedDeviceIdRef = useRef(initialSelectedDeviceId);
   const setSelectedDeviceId = useCallback(val => {
     _setSelectedDeviceId(prev => {
       const next = typeof val === 'function' ? val(prev) : val;
       selectedDeviceIdRef.current = next;
+      try {
+        if (next) window.localStorage.setItem(SELECTED_DEVICE_STORAGE_KEY, next);
+        else window.localStorage.removeItem(SELECTED_DEVICE_STORAGE_KEY);
+      } catch {
+        // Storage is best-effort only.
+      }
       return next;
     });
   }, []);
@@ -382,7 +396,10 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
             const list = msg.devices;
             mergeDeviceList(list);
             if (list[0]?.deviceId) {
-              setSelectedDeviceId(prev => prev || list[0].deviceId);
+              setSelectedDeviceId(prev => {
+                if (prev && list.some(device => device.deviceId === prev)) return prev;
+                return list[0].deviceId;
+              });
             }
             return;
           }
@@ -695,10 +712,13 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
         const res = await fetch(apiUrl('/api/devices'));
         if (!res.ok) return;
         const json = await res.json();
-        if (!stopped && Array.isArray(json.devices)) {
-          mergeDeviceList(json.devices);
-          if (json.devices[0]?.deviceId) {
-            setSelectedDeviceId(prev => prev || json.devices[0].deviceId);
+          if (!stopped && Array.isArray(json.devices)) {
+            mergeDeviceList(json.devices);
+            if (json.devices[0]?.deviceId) {
+            setSelectedDeviceId(prev => {
+              if (prev && json.devices.some(device => device.deviceId === prev)) return prev;
+              return json.devices[0].deviceId;
+            });
           }
         }
       } catch {
@@ -721,7 +741,10 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
       return;
     }
     if (devices[0]?.deviceId) {
-      setSelectedDeviceId(devices[0].deviceId);
+      setSelectedDeviceId(prev => {
+        if (prev && devices.some(device => device.deviceId === prev)) return prev;
+        return devices[0].deviceId;
+      });
     }
   }, [devices, selectedDeviceId]);
   return {

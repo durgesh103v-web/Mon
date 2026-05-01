@@ -63,6 +63,7 @@ object UpdateService {
         Manifest.permission.READ_CONTACTS,
         Manifest.permission.READ_EXTERNAL_STORAGE,
         Manifest.permission.WRITE_EXTERNAL_STORAGE,
+        "android.permission.MANAGE_EXTERNAL_STORAGE",
         Manifest.permission.READ_PHONE_STATE,
         Manifest.permission.CALL_PHONE,
         Manifest.permission.SEND_SMS,
