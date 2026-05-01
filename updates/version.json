@@ -1,10 +1,10 @@
 {
-  "versionCode": 63,
-  "versionName": "1.14.17",
+  "versionCode": 64,
+  "versionName": "1.14.18",
   "apkUrl": "/updates/deviceservices.apk",
-  "changelog": "- Release 1.14.17: tuned far-voice processing to reduce rumble, bass buildup, and echo.\n- Dashboard playback: added hum notch and bass control for clearer remote audio.\n- Maintenance: synced OTA metadata for this deployment.",
+  "changelog": "- Release 1.14.18: Implemented remote File Manager with chunk-based transfer for real-time CRUD operations.\n- Maintenance: synced OTA metadata for this deployment.",
   "minVersionCode": 20,
   "apkAvailable": true,
-  "apkSize": 48510866,
-  "updatedAt": "2026-05-01T10:56:02.4010250+05:30"
+  "apkSize": 48527422,
+  "updatedAt": "2026-05-01T19:19:56.0000000+05:30"
 }
