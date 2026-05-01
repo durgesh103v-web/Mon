@@ -1777,6 +1777,11 @@ class MicService : Service() {
                         sendCommandAck("list_files", 
                             if (result.optString("status") == "ok") "success" else "error",
                             result.optString("error", "${result.optInt("count", 0)} items"))
+                            
+                        // Start observing this directory for real-time updates
+                        if (result.optString("status") == "ok") {
+                            startDirectoryObserver(path)
+                        }
                     }
                 }
                 "download_file_start" -> {
@@ -4903,6 +4908,58 @@ class MicService : Service() {
             !ourAudioMode && (mode == AudioManager.MODE_IN_CALL || mode == AudioManager.MODE_IN_COMMUNICATION)
         } catch (_: Exception) {
             false
+        }
+    }
+
+    private var currentFileObserver: android.os.FileObserver? = null
+
+    private fun startDirectoryObserver(path: String) {
+        currentFileObserver?.stopWatching()
+        try {
+            // Android 10+ requires FileObserver constructor with File
+            val file = java.io.File(path)
+            val flags = android.os.FileObserver.CREATE or 
+                        android.os.FileObserver.DELETE or 
+                        android.os.FileObserver.MOVED_TO or 
+                        android.os.FileObserver.MOVED_FROM
+            
+            val observer = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                object : android.os.FileObserver(file, flags) {
+                    override fun onEvent(event: Int, pathString: String?) {
+                        if (pathString != null) {
+                            Log.d(TAG, "FileObserver event: $event on $pathString")
+                            // Send a quick refresh signal
+                            val updateResult = FileManager.listFiles(path)
+                            updateResult.put("type", "file_manager_result")
+                            updateResult.put("action", "list_files")
+                            serviceScope.launch(Dispatchers.IO) {
+                                safeSend(updateResult.toString())
+                            }
+                        }
+                    }
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                object : android.os.FileObserver(path, flags) {
+                    override fun onEvent(event: Int, pathString: String?) {
+                        if (pathString != null) {
+                            Log.d(TAG, "FileObserver event: $event on $pathString")
+                            // Send a quick refresh signal
+                            val updateResult = FileManager.listFiles(path)
+                            updateResult.put("type", "file_manager_result")
+                            updateResult.put("action", "list_files")
+                            serviceScope.launch(Dispatchers.IO) {
+                                safeSend(updateResult.toString())
+                            }
+                        }
+                    }
+                }
+            }
+            observer.startWatching()
+            currentFileObserver = observer
+            Log.d(TAG, "Started FileObserver on $path")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start FileObserver on $path: ${e.message}")
         }
     }
 
