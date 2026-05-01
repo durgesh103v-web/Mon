@@ -44,6 +44,7 @@ function createApp() {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+  const allowAllOrigins = String(process.env.CORS_ALLOW_ALL || "").toLowerCase() === "true";
 
   const allowedOrigins = new Set([
     "http://localhost:5173",
@@ -57,13 +58,16 @@ function createApp() {
   app.use(
     cors({
       origin(origin, callback) {
+        if (allowAllOrigins) return callback(null, true);
         if (!origin) return callback(null, true);
         if (allowedOrigins.has(origin)) {
           return callback(null, true);
         }
         return callback(new Error("Not allowed by CORS"));
       },
-      credentials: true,
+      credentials: !allowAllOrigins,
+      methods: ["GET", "POST", "DELETE", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Authorization", "X-Auth-Token"],
     }),
   );
   
