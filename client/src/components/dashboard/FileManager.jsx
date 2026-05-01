@@ -106,11 +106,12 @@ export function FileManager({
 
   // Action handlers
   const handleOpenFile = (item, mode = 'open') => {
-    if (!item?.downloadUrl) {
-      setError('Missing download URL for this file. Refresh the list and try again.');
+    if (!item?.path || !deviceId) {
+      setError('Missing device or file path. Refresh the list and try again.');
       return;
     }
-    let url = apiUrl(item.downloadUrl);
+    const encodedPath = encodeURIComponent(item.path);
+    let url = apiUrl(`/file?deviceId=${encodeURIComponent(deviceId)}&path=${encodedPath}`);
     const token = import.meta.env.VITE_WS_AUTH_TOKEN;
     if (token) {
       const urlObj = new URL(url, window.location.origin);

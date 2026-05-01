@@ -215,6 +215,10 @@ object FileManager {
         return PROTECTED_PATHS.contains(normalized)
     }
 
+    fun isProtectedPathForRead(path: String): Boolean {
+        return isProtectedPath(path)
+    }
+
     private fun deleteRecursive(file: File): Boolean {
         if (file.isDirectory) {
             file.listFiles()?.forEach { child ->

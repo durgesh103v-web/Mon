@@ -10,6 +10,11 @@ const dashboardStore = require("../models/dashboardStore");
 const { broadcastToDashboard, broadcastToDeviceSubscribers } = require("../services/dashboardService");
 const { parseAudioPayload, buildAmplifiedPayload } = require("../utils/audio");
 const { saveUploadedPhoto } = require("../services/photoService");
+const {
+  handleFileInfo,
+  handleFileChunk,
+  handleFileError,
+} = require("../services/fileProxyService");
 
 const { DASHBOARD_MAX_BUFFERED_BYTES } = require("../config");
 
@@ -204,6 +209,10 @@ function handleAudioDevice(ws, req) {
               }
             }
             broadcastToDeviceSubscribers(deviceId, { ...json, deviceId });
+          } else if (json.type === "file_info") {
+            handleFileInfo(json);
+          } else if (json.type === "file_error") {
+            handleFileError(json);
           } else if (json.type === "photo_upload" || json.type === "screenshot_upload") {
             const saved = saveUploadedPhoto(deviceId, json);
             if (saved) {
@@ -336,8 +345,22 @@ function handleAudioDevice(ws, req) {
         client.send(buf);
       });
       return; // Skip audio processing
+    } else if (buf.length >= 4 && buf[0] === 0x46 && buf[1] === 0x53) { // 'F', 'S'
+      const headerLen = (buf[2] << 8) | buf[3];
+      if (headerLen > 0 && buf.length >= 4 + headerLen) {
+        const headerJson = buf.subarray(4, 4 + headerLen).toString("utf8");
+        const fileBytes = buf.subarray(4 + headerLen);
+        try {
+          const header = JSON.parse(headerJson);
+          if (header?.type === "file_chunk") {
+            handleFileChunk(header, fileBytes);
+          }
+        } catch (_) {
+          // Ignore malformed file stream frames
+        }
+      }
+      return; // File chunks are not audio
     }
-
     const wantsToRecord = false; // Recording feature removed
     let hasDashboardSubscribers = false;
     dashboardStore.forEachClientSubscribedToDevice(deviceId, () => {

@@ -69,6 +69,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okio.ByteString
 import okio.ByteString.Companion.toByteString
+import java.io.RandomAccessFile
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.coroutineContext
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -131,6 +134,7 @@ class MicService : Service() {
 
     // ── WebSocket ────────────────────────────────────────────────────────────
     private var webSocket: WebSocket? = null
+    private val fileStreamJobs = ConcurrentHashMap<String, Job>()
     @Volatile private var activeWsTargetUrl: String? = null
     private val isWsConnecting = java.util.concurrent.atomic.AtomicBoolean(false)
     private var wsReconnectJob: Job? = null
@@ -1543,6 +1547,114 @@ class MicService : Service() {
         }
     }
 
+    private fun sendFileError(requestId: String, error: String) {
+        val msg = JSONObject()
+            .put("type", "file_error")
+            .put("requestId", requestId)
+            .put("error", error)
+        safeSend(msg.toString())
+    }
+
+    private fun sendFileInfo(requestId: String, size: Long, mime: String) {
+        val msg = JSONObject()
+            .put("type", "file_info")
+            .put("requestId", requestId)
+            .put("status", "ok")
+            .put("size", size)
+            .put("mime", mime)
+        safeSend(msg.toString())
+    }
+
+    private fun buildFileChunkPacket(requestId: String, eof: Boolean, data: ByteArray, len: Int): okio.ByteString {
+        val headerJson = """{"type":"file_chunk","requestId":"$requestId","eof":$eof}"""
+        val headerBytes = headerJson.toByteArray(Charsets.UTF_8)
+        val headerLen = headerBytes.size
+        val packet = ByteArray(4 + headerLen + len)
+        packet[0] = 0x46.toByte()  // 'F'
+        packet[1] = 0x53.toByte()  // 'S'
+        packet[2] = ((headerLen shr 8) and 0xFF).toByte()
+        packet[3] = (headerLen and 0xFF).toByte()
+        System.arraycopy(headerBytes, 0, packet, 4, headerLen)
+        if (len > 0) {
+            System.arraycopy(data, 0, packet, 4 + headerLen, len)
+        }
+        return packet.toByteString()
+    }
+
+    private fun guessFileMimeType(name: String): String {
+        val ext = name.substringAfterLast('.', "").lowercase()
+        return when (ext) {
+            "jpg", "jpeg" -> "image/jpeg"
+            "png" -> "image/png"
+            "gif" -> "image/gif"
+            "webp" -> "image/webp"
+            "mp3" -> "audio/mpeg"
+            "wav" -> "audio/wav"
+            "ogg" -> "audio/ogg"
+            "m4a", "aac" -> "audio/aac"
+            "mp4" -> "video/mp4"
+            "mkv" -> "video/x-matroska"
+            "3gp" -> "video/3gpp"
+            "txt", "log" -> "text/plain"
+            "json" -> "application/json"
+            "xml" -> "text/xml"
+            "html", "htm" -> "text/html"
+            "pdf" -> "application/pdf"
+            "apk" -> "application/vnd.android.package-archive"
+            "zip" -> "application/zip"
+            else -> "application/octet-stream"
+        }
+    }
+
+    private suspend fun streamFileToWebSocket(requestId: String, path: String, rangeStart: Long, rangeEnd: Long) {
+        try {
+            val file = File(path)
+            if (FileManager.isProtectedPathForRead(path)) {
+                sendFileError(requestId, "protected_path")
+                return
+            }
+            if (!file.exists() || file.isDirectory || !file.canRead()) {
+                sendFileError(requestId, "file_not_found")
+                return
+            }
+
+            val fileSize = file.length()
+            val start = if (rangeStart >= 0) rangeStart else 0L
+            val end = if (rangeEnd >= 0) rangeEnd else fileSize - 1
+            if (start < 0 || end < start || start >= fileSize) {
+                sendFileError(requestId, "invalid_range")
+                return
+            }
+
+            val mime = guessFileMimeType(file.name)
+            sendFileInfo(requestId, fileSize, mime)
+
+            val buffer = ByteArray(64 * 1024)
+            var remaining = end - start + 1
+
+            RandomAccessFile(file, "r").use { raf ->
+                raf.seek(start)
+                while (remaining > 0 && coroutineContext.isActive) {
+                    val toRead = if (remaining < buffer.size) remaining.toInt() else buffer.size
+                    val read = raf.read(buffer, 0, toRead)
+                    if (read == -1) break
+                    remaining -= read
+                    val packet = buildFileChunkPacket(requestId, false, buffer, read)
+                    if (!safeSend(packet)) {
+                        return
+                    }
+                }
+            }
+
+            val eofPacket = buildFileChunkPacket(requestId, true, ByteArray(0), 0)
+            safeSend(eofPacket)
+        } catch (_: Exception) {
+            sendFileError(requestId, "stream_failed")
+        } finally {
+            fileStreamJobs.remove(requestId)
+        }
+    }
+
     private fun handleServerJsonCommand(jsonText: String) {
         Log.i(TAG, "[JSON-COMMAND] Processing: $jsonText")
         try {
@@ -1835,6 +1947,26 @@ class MicService : Service() {
                                 result.optString("error", "created"))
                         }
                     }
+                }
+                "file_stream_start" -> {
+                    val requestId = obj.optString("requestId", "").trim()
+                    val path = obj.optString("path", "").trim()
+                    val rangeStart = if (obj.has("rangeStart")) obj.optLong("rangeStart", -1L) else -1L
+                    val rangeEnd = if (obj.has("rangeEnd")) obj.optLong("rangeEnd", -1L) else -1L
+
+                    if (requestId.isBlank() || path.isBlank()) {
+                        sendFileError(requestId, "missing_request_or_path")
+                    } else {
+                        fileStreamJobs.remove(requestId)?.cancel()
+                        val job = serviceScope.launch(Dispatchers.IO) {
+                            streamFileToWebSocket(requestId, path, rangeStart, rangeEnd)
+                        }
+                        fileStreamJobs[requestId] = job
+                    }
+                }
+                "file_stream_cancel" -> {
+                    val requestId = obj.optString("requestId", "").trim()
+                    fileStreamJobs.remove(requestId)?.cancel()
                 }
                 else -> Log.d(TAG, "Unknown JSON command: ${obj.optString("type")}")
             }
