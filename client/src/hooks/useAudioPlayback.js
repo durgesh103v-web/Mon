@@ -132,20 +132,34 @@ export function useAudioPlayback() {
     compressor.attack.value = 0.003;    // Fast attack to catch speech transients
     compressor.release.value = 0.25;    // Slower release to avoid pumping
 
-    // 2. Highpass filter: removes low-frequency hum/rumble (< 85Hz)
+    // 2. Highpass filter: removes low-frequency hum/rumble
     const highpass = ctx.createBiquadFilter();
     highpass.type = 'highpass';
-    highpass.frequency.value = 85;
+    highpass.frequency.value = 110;
     highpass.Q.value = 0.7;
 
-    // 3. Gain node: final volume boost
+    // 3. Notch filter: suppress mains hum around 60Hz
+    const notch = ctx.createBiquadFilter();
+    notch.type = 'notch';
+    notch.frequency.value = 60;
+    notch.Q.value = 12;
+
+    // 4. Low-shelf cut: reduce bass buildup without thinning speech
+    const lowShelf = ctx.createBiquadFilter();
+    lowShelf.type = 'lowshelf';
+    lowShelf.frequency.value = 180;
+    lowShelf.gain.value = -4;
+
+    // 5. Gain node: final volume boost
     const gainNode = ctx.createGain();
-    gainNode.gain.value = volumeRef.current * 3.0;  // 3.0× client-side base boost
+    gainNode.gain.value = volumeRef.current * 2.2;  // Lower boost to avoid amplifying noise
     gainNodeRef.current = gainNode;
 
-    // Connect chain: compressor → highpass → gain → output
+    // Connect chain: compressor → highpass → notch → low-shelf → gain → output
     compressor.connect(highpass);
-    highpass.connect(gainNode);
+    highpass.connect(notch);
+    notch.connect(lowShelf);
+    lowShelf.connect(gainNode);
     gainNode.connect(ctx.destination);
 
     // Prefer AudioWorklet (real-time audio thread). Fallback to ScriptProcessor only if unavailable.

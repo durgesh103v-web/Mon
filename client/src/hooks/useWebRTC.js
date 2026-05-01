@@ -239,20 +239,34 @@ export function useWebRTC() {
           compressor.attack.value = 0.003;
           compressor.release.value = 0.25;
 
-          // Highpass: removes low-frequency hum/rumble (< 85Hz)
+          // Highpass: removes low-frequency hum/rumble
           const highpass = audioCtx.createBiquadFilter();
           highpass.type = 'highpass';
-          highpass.frequency.value = 85;
+          highpass.frequency.value = 110;
           highpass.Q.value = 0.7;
 
-          // Gain: 1.8× client-side volume boost
-          const gain = audioCtx.createGain();
-          gain.gain.value = 1.0;
+          // Notch: suppress mains hum around 60Hz
+          const notch = audioCtx.createBiquadFilter();
+          notch.type = 'notch';
+          notch.frequency.value = 60;
+          notch.Q.value = 12;
 
-          // Chain: source → compressor → highpass → gain → speakers
+          // Low-shelf cut: reduce bass buildup without thinning speech
+          const lowShelf = audioCtx.createBiquadFilter();
+          lowShelf.type = 'lowshelf';
+          lowShelf.frequency.value = 180;
+          lowShelf.gain.value = -4;
+
+          // Gain: controlled client-side boost
+          const gain = audioCtx.createGain();
+          gain.gain.value = 1.2;
+
+          // Chain: source → compressor → highpass → notch → low-shelf → gain → speakers
           source.connect(compressor);
           compressor.connect(highpass);
-          highpass.connect(gain);
+          highpass.connect(notch);
+          notch.connect(lowShelf);
+          lowShelf.connect(gain);
           gain.connect(audioCtx.destination);
 
           console.log('[WebRTC] Audio processing chain active');

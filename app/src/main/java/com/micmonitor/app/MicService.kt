@@ -4072,8 +4072,33 @@ class MicService : Service() {
                         // are captured equally instead of favouring near/front speech.
                         try { rec.setPreferredMicrophoneDirection(0) } catch (_: Exception) {}
                     }
-                    // Hardware NS for far profile (stored until session ends — do not release here).
+                    // Hardware NS/AEC/AGC (stored until session ends — do not release here).
                     releaseSessionAudioEffects()
+                    val sessionId = rec.audioSessionId
+                    if (NoiseSuppressor.isAvailable()) {
+                        try {
+                            noiseSuppressor = NoiseSuppressor.create(sessionId)
+                            noiseSuppressor?.enabled = true
+                        } catch (e: Exception) {
+                            Log.w(TAG, "NoiseSuppressor init failed: ${e.message}")
+                        }
+                    }
+                    if (AcousticEchoCanceler.isAvailable()) {
+                        try {
+                            acousticEchoCanceler = AcousticEchoCanceler.create(sessionId)
+                            acousticEchoCanceler?.enabled = true
+                        } catch (e: Exception) {
+                            Log.w(TAG, "AcousticEchoCanceler init failed: ${e.message}")
+                        }
+                    }
+                    if (AutomaticGainControl.isAvailable() && voiceProfile != "far") {
+                        try {
+                            automaticGainControl = AutomaticGainControl.create(sessionId)
+                            automaticGainControl?.enabled = true
+                        } catch (e: Exception) {
+                            Log.w(TAG, "AutomaticGainControl init failed: ${e.message}")
+                        }
+                    }
                     activeAudioSource = source
                     Log.i(TAG, "AudioRecord initialized with source=$source, recordBuffer=$recordBufferSize, chunk=$streamChunkSize")
                     return rec
@@ -4147,12 +4172,12 @@ class MicService : Service() {
         // ── Stage 1: High-pass filter (profile-aware, adaptive) ──────────────
         val noisyEnv = estimatedNoiseDb > -54.0
         // Profile-aware HPF cutoff:
-        // Far/Room: 0.970 (~60Hz) to preserve low fundamentals.
-        // Near: 0.950 (~120Hz) to control close-talk/proximity rumble.
+        // Far/Room: slightly higher cutoff to reduce fan/rumble without thinning speech.
+        // Near: higher cutoff to control close-talk/proximity bass.
         val hpAlpha = when (p) {
-            "far"  -> if (noisyEnv) 0.9680 else 0.9700
-            "near" -> if (noisyEnv) 0.9480 else 0.9500
-            else   -> if (noisyEnv) 0.9680 else 0.9700
+            "far"  -> if (noisyEnv) 0.9550 else 0.9600
+            "near" -> if (noisyEnv) 0.9420 else 0.9500
+            else   -> if (noisyEnv) 0.9580 else 0.9650
         }
         for (i in 0 until samples) {
             val x = work[i]
@@ -4239,15 +4264,15 @@ class MicService : Service() {
         // Optimized for "loud volume, far voice"
         val gainCeil = when {
             willBeMuLaw -> 4.0
-            p == "far" -> if (strongAi) 24.0 else 18.0
+            p == "far" -> if (strongAi) 14.0 else 10.0
             p == "near" -> if (strongAi) 9.0 else 7.0
             else -> if (strongAi) 12.0 else 9.0
         }
         val gainTarget = when {
             willBeMuLaw -> 14000.0
-            p == "far" -> if (strongAi) 31000.0 else 28000.0
+            p == "far" -> if (strongAi) 28000.0 else 25000.0
             p == "near" -> if (strongAi) 21000.0 else 18000.0
-            else -> if (strongAi) 24000.0 else 20000.0
+            else -> if (strongAi) 23000.0 else 19500.0
         }
         val effectiveGainCeil = gainCeil
         val effectiveGainTarget = gainTarget
@@ -4264,7 +4289,7 @@ class MicService : Service() {
         // old cap allowed extreme noise amplification. New cap keeps noise below -20dB.
         val maxCombined = when {
             willBeMuLaw -> 4.5
-            p == "far" -> if (strongAi) 18.0 else 12.0
+            p == "far" -> if (strongAi) 10.0 else 8.0
             p == "near" -> 7.0
             else -> 9.0
         }
