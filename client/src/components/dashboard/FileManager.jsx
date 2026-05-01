@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { apiUrl } from '../../lib/helpers';
 
 // Helper: Format bytes to human readable string
 const formatBytes = (bytes, decimals = 2) => {
@@ -38,14 +39,8 @@ export function FileManager({
   // Dialog state
   const [dialogState, setDialogState] = useState({ open: false, type: null, item: null, input: '' });
   
-  // Transfer Progress State
-  const [transfers, setTransfers] = useState({});
-
   // Refs for tracking mutable transfer state
   const pendingPathRef = useRef(null);
-  const activeDownloads = useRef({});
-  const activeUploads = useRef({});
-  const fileInputRef = useRef(null);
 
   // Request files for a path
   const loadPath = useCallback((path) => {
@@ -63,116 +58,13 @@ export function FileManager({
     }
   }, [deviceId, isConnected]);
 
-  // Process chunk array and trigger download
-  const finishDownload = (transferId) => {
-    const download = activeDownloads.current[transferId];
-    if (!download) return;
-
-    try {
-      // Calculate total byte length
-      let totalLength = 0;
-      for (const chunk of download.chunks) {
-        totalLength += chunk.length;
-      }
-
-      // Concatenate all chunks into one Uint8Array
-      const fullData = new Uint8Array(totalLength);
-      let offset = 0;
-      for (const chunk of download.chunks) {
-        fullData.set(chunk, offset);
-        offset += chunk.length;
-      }
-
-      // Create Blob and trigger download
-      const blob = new Blob([fullData], { type: 'application/octet-stream' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = download.name;
-      document.body.appendChild(a);
-      a.click();
-      
-      // Cleanup
-      setTimeout(() => {
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }, 1000);
-      
-      setTransfers(prev => {
-        const next = {...prev};
-        delete next[transferId];
-        return next;
-      });
-      delete activeDownloads.current[transferId];
-      
-    } catch (err) {
-      setError(`Failed to save downloaded file: ${err.message}`);
-    }
-  };
-
-  const processNextUploadChunk = (transferId) => {
-    const upload = activeUploads.current[transferId];
-    if (!upload) return;
-
-    if (upload.chunkIndex >= upload.totalChunks) {
-      // Should not happen, wait for upload_complete
-      return;
-    }
-
-    const start = upload.chunkIndex * upload.chunkSize;
-    const end = Math.min(start + upload.chunkSize, upload.file.size);
-    const chunkBlob = upload.file.slice(start, end);
-    
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      // Convert ArrayBuffer to Base64
-      const buffer = e.target.result;
-      const bytes = new Uint8Array(buffer);
-      let binary = '';
-      for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      const base64Data = btoa(binary);
-      
-      const isLast = upload.chunkIndex === upload.totalChunks - 1;
-      
-      onCommand('upload_file_chunk', {
-        path: upload.targetPath,
-        data: base64Data,
-        append: upload.chunkIndex > 0, // False for first chunk (overwrite)
-        isLast: isLast
-      });
-      
-      upload.chunkIndex++;
-      
-      // Update progress UI
-      setTransfers(prev => ({
-        ...prev,
-        [transferId]: {
-          ...prev[transferId],
-          progress: Math.floor((upload.chunkIndex / upload.totalChunks) * 100)
-        }
-      }));
-    };
-    reader.readAsArrayBuffer(chunkBlob);
-  };
-
   // Handle incoming data
   useEffect(() => {
     if (!fileManagerData || fileManagerData.deviceId !== deviceId) return;
 
-    const { action, status, error: resultError, transferId } = fileManagerData;
+    const { action, status, error: resultError } = fileManagerData;
 
     if (status === 'error') {
-      if (transferId) {
-        setTransfers(prev => {
-          const next = {...prev};
-          delete next[transferId];
-          return next;
-        });
-        delete activeDownloads.current[transferId];
-        delete activeUploads.current[transferId];
-      }
       setError(resultError || 'Unknown error occurred');
       setIsLoading(false);
       return;
@@ -191,72 +83,6 @@ export function FileManager({
       setCurrentPath(newPath);
       setIsLoading(false);
       pendingPathRef.current = null;
-    } 
-    else if (action === 'download_chunk') {
-      if (!transferId) return;
-      const download = activeDownloads.current[transferId];
-      if (!download) return;
-
-      const { chunkIndex, totalChunks, data: base64Data } = fileManagerData;
-      
-      // Decode base64 to binary
-      const binaryStr = atob(base64Data);
-      const bytes = new Uint8Array(binaryStr.length);
-      for (let i = 0; i < binaryStr.length; i++) {
-        bytes[i] = binaryStr.charCodeAt(i);
-      }
-      
-      // Store chunk
-      download.chunks[chunkIndex] = bytes;
-      
-      // Update progress
-      setTransfers(prev => ({
-        ...prev,
-        [transferId]: {
-          ...prev[transferId],
-          progress: Math.floor(((chunkIndex + 1) / totalChunks) * 100)
-        }
-      }));
-
-      // Check if complete
-      let receivedCount = 0;
-      for (let i = 0; i < totalChunks; i++) {
-        if (download.chunks[i]) receivedCount++;
-      }
-      
-      if (receivedCount === totalChunks) {
-        finishDownload(transferId);
-      }
-    }
-    else if (action === 'upload_chunk_ack') {
-      // Find the transfer ID for this path (we don't get transferId back from device on ack currently,
-      // so we find it by path. Ideally device returns transferId, but we can match path).
-      const path = fileManagerData.path;
-      let tid = null;
-      for (const [key, upload] of Object.entries(activeUploads.current)) {
-        if (upload.targetPath === path) tid = key;
-      }
-      
-      if (tid) {
-        processNextUploadChunk(tid);
-      }
-    }
-    else if (action === 'upload_complete') {
-      const path = fileManagerData.path;
-      let tid = null;
-      for (const [key, upload] of Object.entries(activeUploads.current)) {
-        if (upload.targetPath === path) tid = key;
-      }
-      
-      if (tid) {
-        setTransfers(prev => {
-          const next = {...prev};
-          delete next[tid];
-          return next;
-        });
-        delete activeUploads.current[tid];
-        loadPath(currentPath); // Refresh
-      }
     }
     else if (['delete_file', 'rename_file', 'create_dir'].includes(action)) {
       loadPath(currentPath);
@@ -279,60 +105,28 @@ export function FileManager({
   };
 
   // Action handlers
-  const handleDownloadFile = (item) => {
-    const transferId = `dl_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-    
-    activeDownloads.current[transferId] = {
-      name: item.name,
-      path: item.path,
-      chunks: []
-    };
-    
-    setTransfers(prev => ({
-      ...prev,
-      [transferId]: {
-        type: 'download',
-        name: item.name,
-        progress: 0
-      }
-    }));
-    
-    onCommand('download_file_start', { path: item.path, transferId });
-  };
-
-  const handleUploadFileSelect = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const transferId = `ul_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-    const targetPath = currentPath.replace(/\/?$/, '/') + file.name;
-    
-    // 512KB chunks
-    const chunkSize = 1024 * 512;
-    const totalChunks = Math.ceil(file.size / chunkSize);
-
-    activeUploads.current[transferId] = {
-      file,
-      targetPath,
-      chunkSize,
-      totalChunks,
-      chunkIndex: 0
-    };
-
-    setTransfers(prev => ({
-      ...prev,
-      [transferId]: {
-        type: 'upload',
-        name: file.name,
-        progress: 0
-      }
-    }));
-
-    // Start first chunk
-    processNextUploadChunk(transferId);
-    
-    // Reset input
-    e.target.value = null;
+  const handleOpenFile = (item, mode = 'open') => {
+    if (!item?.downloadUrl) {
+      setError('Missing download URL for this file. Refresh the list and try again.');
+      return;
+    }
+    let url = apiUrl(item.downloadUrl);
+    const token = import.meta.env.VITE_WS_AUTH_TOKEN;
+    if (token) {
+      const urlObj = new URL(url, window.location.origin);
+      urlObj.searchParams.set('token', token);
+      url = urlObj.toString();
+    }
+    if (mode === 'download') {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = item?.name || 'download';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return;
+    }
+    window.open(url, '_blank', 'noopener');
   };
 
   const executeAction = () => {
@@ -425,20 +219,6 @@ export function FileManager({
         </div>
         
         <div className="flex items-center gap-2">
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            onChange={handleUploadFileSelect} 
-            className="hidden" 
-          />
-          <button 
-            onClick={() => fileInputRef.current?.click()}
-            className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors border border-zinc-700/50 text-sm font-semibold flex items-center gap-2"
-            title="Upload File"
-            disabled={isLoading}
-          >
-            ⬆️ Upload
-          </button>
           <button 
             onClick={() => openDialog('mkdir')}
             className="p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors border border-zinc-700/50"
@@ -457,29 +237,6 @@ export function FileManager({
           </button>
         </div>
       </div>
-
-      {/* ACTIVE TRANSFERS BANNER */}
-      {Object.keys(transfers).length > 0 && (
-        <div className="bg-zinc-900 border-b border-zinc-800 p-2 flex flex-col gap-2 max-h-32 overflow-y-auto">
-          {Object.entries(transfers).map(([id, t]) => (
-            <div key={id} className="flex items-center gap-3 text-xs bg-zinc-950 p-2 rounded-lg border border-zinc-800">
-              <span className="text-lg">{t.type === 'download' ? '⬇️' : '⬆️'}</span>
-              <div className="flex-1 min-w-0">
-                <div className="flex justify-between text-zinc-300 mb-1">
-                  <span className="truncate font-semibold">{t.name}</span>
-                  <span>{t.progress}%</span>
-                </div>
-                <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                  <div 
-                    className={`h-full rounded-full transition-all duration-300 ${t.type === 'download' ? 'bg-cyan-500' : 'bg-emerald-500'}`} 
-                    style={{ width: `${t.progress}%` }} 
-                  />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
 
       {/* ERROR BANNER */}
       {error && (
@@ -552,7 +309,7 @@ export function FileManager({
                         onClick={() => {
                           if (!item.canRead) return;
                           if (item.isDir) handleNavigate(item.path);
-                          else handleDownloadFile(item);
+                          else handleOpenFile(item);
                         }}
                       >
                         {item.isDir ? '📁' : '📄'}
@@ -562,7 +319,7 @@ export function FileManager({
                         onClick={() => {
                           if (!item.canRead) return;
                           if (item.isDir) handleNavigate(item.path);
-                          else handleDownloadFile(item);
+                          else handleOpenFile(item);
                         }}
                         title={item.name}
                       >
@@ -585,8 +342,17 @@ export function FileManager({
                         <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           {!item.isDir && (
                             <button 
-                              onClick={(e) => { e.stopPropagation(); handleDownloadFile(item); }}
+                              onClick={(e) => { e.stopPropagation(); handleOpenFile(item, 'open'); }}
                               className="p-1.5 bg-zinc-800 hover:bg-cyan-900/50 text-zinc-300 hover:text-cyan-400 rounded transition-colors"
+                              title="Open"
+                            >
+                              🔗
+                            </button>
+                          )}
+                          {!item.isDir && (
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); handleOpenFile(item, 'download'); }}
+                              className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded transition-colors"
                               title="Download"
                             >
                               ⬇️

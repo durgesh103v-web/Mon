@@ -1,10 +1,10 @@
 package com.micmonitor.app
 
-import android.util.Base64
 import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.net.URLEncoder
 
 /**
  * Utility object for remote file system CRUD operations.
@@ -62,6 +62,10 @@ object FileManager {
                     item.put("lastModified", file.lastModified())
                     item.put("canRead", file.canRead())
                     item.put("canWrite", file.canWrite())
+                    if (!file.isDirectory && file.canRead()) {
+                        val encodedPath = URLEncoder.encode(file.absolutePath, "UTF-8")
+                        item.put("downloadUrl", "/file?path=$encodedPath")
+                    }
                     if (file.isDirectory) {
                         item.put("childCount", file.listFiles()?.size ?: 0)
                     }
@@ -87,83 +91,6 @@ object FileManager {
         return result
     }
 
-    /**
-     * Read a file in chunks and send each chunk via the provided callback.
-     * Prevents OutOfMemory errors on large files (e.g., 350MB video).
-     */
-    fun readFileInChunks(path: String, chunkSize: Int = 1024 * 512, onChunk: (base64Data: String, chunkIndex: Int, totalChunks: Int, isError: Boolean, errorMsg: String?) -> Unit) {
-        try {
-            val file = File(path)
-            if (!file.exists() || file.isDirectory || !file.canRead()) {
-                onChunk("", 0, 0, true, "Cannot read file: $path")
-                return
-            }
-
-            val totalSize = file.length()
-            val totalChunks = Math.ceil(totalSize.toDouble() / chunkSize).toInt()
-            
-            file.inputStream().use { input ->
-                val buffer = ByteArray(chunkSize)
-                var bytesRead: Int
-                var chunkIndex = 0
-                
-                while (input.read(buffer).also { bytesRead = it } != -1) {
-                    val actualBytes = if (bytesRead == chunkSize) buffer else buffer.copyOf(bytesRead)
-                    val base64 = Base64.encodeToString(actualBytes, Base64.NO_WRAP)
-                    onChunk(base64, chunkIndex, totalChunks, false, null)
-                    chunkIndex++
-                }
-            }
-            Log.d(TAG, "Finished reading file in chunks: $path")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error reading chunks $path: ${e.message}")
-            onChunk("", 0, 0, true, "Error: ${e.message}")
-        }
-    }
-
-    /**
-     * Append a base64 chunk to a file. Useful for chunked file uploads.
-     */
-    fun appendFileChunk(path: String, base64Data: String, append: Boolean): JSONObject {
-        val result = JSONObject()
-        try {
-            if (isProtectedPath(path)) {
-                result.put("status", "error")
-                result.put("error", "Cannot write to protected path: $path")
-                return result
-            }
-
-            val file = File(path)
-            if (!append) {
-                file.parentFile?.mkdirs()
-            }
-
-            val bytes = Base64.decode(base64Data, Base64.NO_WRAP)
-            
-            file.outputStream().use { output ->
-                if (append) {
-                    // Manually append (FileOutputStream(file, true) could be used but standard library has use)
-                    java.io.FileOutputStream(file, true).use {
-                        it.write(bytes)
-                    }
-                } else {
-                    java.io.FileOutputStream(file, false).use {
-                        it.write(bytes)
-                    }
-                }
-            }
-
-            result.put("status", "ok")
-            result.put("path", file.absolutePath)
-            result.put("bytesWritten", bytes.size)
-            result.put("totalSize", file.length())
-        } catch (e: Exception) {
-            result.put("status", "error")
-            result.put("error", "Failed to write chunk: ${e.message}")
-            Log.e(TAG, "Error appending to $path: ${e.message}")
-        }
-        return result
-    }
 
     /**
      * Delete a file or empty directory.

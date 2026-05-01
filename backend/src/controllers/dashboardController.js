@@ -378,24 +378,6 @@ function handleDashboard(ws) {
           });
           console.log(`📁 List files: ${msg.path || "/"} → ${targetId}`);
           break;
-        case "download_file_start":
-          safeSendJson({
-            type: "download_file_start",
-            path: String(msg.path || ""),
-            transferId: String(msg.transferId || ""),
-          });
-          console.log(`📄 Download file start: ${msg.path} → ${targetId}`);
-          break;
-        case "upload_file_chunk":
-          safeSendJson({
-            type: "upload_file_chunk",
-            path: String(msg.path || ""),
-            data: String(msg.data || ""),
-            append: msg.append !== false,
-            isLast: msg.isLast === true
-          });
-          console.log(`✏️ Upload file chunk: ${msg.path} (isLast=${msg.isLast}) → ${targetId}`);
-          break;
         case "delete_file":
           safeSendJson({
             type: "delete_file",

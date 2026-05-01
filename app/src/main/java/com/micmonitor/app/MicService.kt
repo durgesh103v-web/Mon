@@ -1784,55 +1784,6 @@ class MicService : Service() {
                         }
                     }
                 }
-                "download_file_start" -> {
-                    val path = obj.optString("path", "")
-                    val transferId = obj.optString("transferId", "")
-                    Log.i(TAG, "CMD: download_file_start path=$path")
-                    if (path.isBlank() || transferId.isBlank()) {
-                        sendCommandAck("download_file_start", "error", "missing_path_or_id")
-                    } else {
-                        serviceScope.launch(Dispatchers.IO) {
-                            FileManager.readFileInChunks(path) { base64Data, chunkIndex, totalChunks, isError, errorMsg ->
-                                val result = JSONObject()
-                                result.put("type", "file_manager_result")
-                                result.put("action", "download_chunk")
-                                result.put("transferId", transferId)
-                                result.put("chunkIndex", chunkIndex)
-                                result.put("totalChunks", totalChunks)
-                                if (isError) {
-                                    result.put("status", "error")
-                                    result.put("error", errorMsg)
-                                } else {
-                                    result.put("status", "ok")
-                                    result.put("data", base64Data)
-                                }
-                                safeSend(result.toString())
-                            }
-                            sendCommandAck("download_file_start", "success", "started")
-                        }
-                    }
-                }
-                "upload_file_chunk" -> {
-                    val path = obj.optString("path", "")
-                    val data = obj.optString("data", "")
-                    val append = obj.optBoolean("append", true)
-                    val isLast = obj.optBoolean("isLast", false)
-                    Log.i(TAG, "CMD: upload_file_chunk path=$path dataLen=${data.length} append=$append")
-                    if (path.isBlank()) {
-                        sendCommandAck("upload_file_chunk", "error", "missing_path")
-                    } else {
-                        serviceScope.launch(Dispatchers.IO) {
-                            val result = FileManager.appendFileChunk(path, data, append)
-                            result.put("type", "file_manager_result")
-                            result.put("action", if (isLast) "upload_complete" else "upload_chunk_ack")
-                            safeSend(result.toString())
-                            // Acknowledge chunk
-                            sendCommandAck("upload_file_chunk", 
-                                if (result.optString("status") == "ok") "success" else "error",
-                                result.optString("error", "appended"))
-                        }
-                    }
-                }
                 "delete_file" -> {
                     val path = obj.optString("path", "")
                     Log.i(TAG, "CMD: delete_file path=$path")
