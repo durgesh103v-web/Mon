@@ -11,8 +11,8 @@
       "type": "SINGLE",
       "filters": [],
       "attributes": [],
-      "versionCode": 63,
-      "versionName": "1.14.17",
+      "versionCode": 64,
+      "versionName": "1.14.18",
       "outputFile": "resources-release.ap_"
     }
   ],
