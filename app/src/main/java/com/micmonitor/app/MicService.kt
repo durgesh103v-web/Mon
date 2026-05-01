@@ -156,9 +156,9 @@ class MicService : Service() {
         .writeTimeout(8, TimeUnit.SECONDS) // Bug 2.8: Add retry backoff logic via writeTimeout reduction
         .build()
     private val photoUploadClient = httpClient.newBuilder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
         .build()
     private val recordingUploadClient = httpClient.newBuilder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -2625,13 +2625,13 @@ class MicService : Service() {
         serviceScope.launch(Dispatchers.IO) {
             try {
                 if (oldLiveJob != null) {
-                    try { withTimeout(2_000L) { oldLiveJob.join() } } catch (_: Exception) {}
+                    try { withTimeout(700L) { oldLiveJob.join() } } catch (_: Exception) {}
                 }
                 val totalTimeoutMs = when (photoNightMode) {
-                    "5s" -> 25_000L
-                    "3s" -> 20_000L
-                    "1s" -> 18_000L
-                    else -> 15_000L
+                    "5s" -> 16_000L
+                    "3s" -> 14_000L
+                    "1s" -> 12_000L
+                    else -> 10_000L
                 }
                 withTimeoutOrNull(totalTimeoutMs) {
                     val explicitFacing = parseRequestedCameraFacing(cameraMode)
@@ -2783,7 +2783,7 @@ class MicService : Service() {
                         if (bitmap != null) {
                             serviceScope.launch(Dispatchers.IO) {
                                 val stream = java.io.ByteArrayOutputStream()
-                                bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream)
+                                bitmap.compress(Bitmap.CompressFormat.JPEG, 82, stream)
                                 val jpegBytes = stream.toByteArray()
                                 bitmap.recycle()
                                 uploadScreenshotBytes(jpegBytes)
@@ -2937,8 +2937,8 @@ class MicService : Service() {
         // Normal/Fast: reasonable size that still captures full frame
         val maxEdge = when (photoQualityMode) {
             "fast" -> 1280   // Reduced for size
-            "hd" -> 4096     // Full 4K / 8MP+ detail
-            else -> 2560     // Balanced
+            "hd" -> 2560     // High detail without huge upload latency
+            else -> 1920     // Balanced realtime capture
         }
         
         val allSizes = streamMap.getOutputSizes(ImageFormat.JPEG) ?: return null
@@ -3022,16 +3022,16 @@ class MicService : Service() {
             }, handler)
 
             val stageTimeoutMs = when (photoNightMode) {
-                "5s" -> 12_000L
-                "3s" -> 10_000L
-                "1s" -> 9_000L
-                else -> 8_000L
+                "5s" -> 8_000L
+                "3s" -> 7_000L
+                "1s" -> 6_000L
+                else -> 5_000L
             }
             val captureTimeoutMs = when (photoNightMode) {
-                "5s" -> 12_000L
-                "3s" -> 10_000L
-                "1s" -> 9_000L
-                else -> 8_000L
+                "5s" -> 8_000L
+                "3s" -> 7_000L
+                "1s" -> 6_000L
+                else -> 5_000L
             }
             val cameraDevice = withTimeoutOrNull(stageTimeoutMs) {
                 suspendCancellableCoroutine<CameraDevice?> { cont ->
@@ -3107,7 +3107,7 @@ class MicService : Service() {
                 set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation)
             }.build()
             captureSession.setRepeatingRequest(warmupReq, captureCallback, handler)
-            withTimeoutOrNull(3_000L) { aeConverged.await() }
+            withTimeoutOrNull(if (photoNightMode == "off") 1_200L else 1_800L) { aeConverged.await() }
 
             // Explicit AF trigger then lock wait (up to 3s) before firing the still.
             val afTriggerReq = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
@@ -3120,7 +3120,7 @@ class MicService : Service() {
                 set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation)
             }.build()
             captureSession.capture(afTriggerReq, captureCallback, handler)
-            withTimeoutOrNull(3_000L) { afLocked.await() }
+            withTimeoutOrNull(if (photoNightMode == "off") 1_200L else 1_800L) { afLocked.await() }
 
             val req = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
                 addTarget(imageReader.surface)
@@ -3172,13 +3172,13 @@ class MicService : Service() {
                 set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation)
 
                 // High quality JPEG (we compress later with network awareness)
-                set(CaptureRequest.JPEG_QUALITY, 95.toByte())
+                set(CaptureRequest.JPEG_QUALITY, 92.toByte())
             }.build()
             captureSession.stopRepeating()
             // Flush all residual preview frames from the ImageReader so they don't
             // race with the actual still capture after isWarmupComplete is set.
             captureSession.abortCaptures()
-            delay(800L)
+            delay(if (photoNightMode == "off") 160L else 260L)
             // Drain any images that arrived during the abort window
             var drained = 0
             while (true) {
@@ -3516,8 +3516,8 @@ class MicService : Service() {
             // Use full resolution for HD, reasonable for others (no aggressive crop)
             val maxEdge = when (qualityMode) {
                 "fast" -> 1280   // Reduced for size
-                "hd" -> 4096     // Full 4K / 8MP+ detail
-                else -> 2560     // Balanced
+                "hd" -> 2560     // High detail without huge upload latency
+                else -> 1920     // Balanced realtime capture
             }
             var sample = 1
             while ((bounds.outWidth / sample) > maxEdge || (bounds.outHeight / sample) > maxEdge) {

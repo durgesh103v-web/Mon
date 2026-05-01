@@ -177,7 +177,9 @@ async function listPhotos(req, res) {
       .filter((f) => /\.(jpg|jpeg|png)$/i.test(f))
       .filter((f) => {
         if (deviceId) {
-          const match = f.match(/^photo_([a-z0-9_-]+)_/i);
+          const match =
+            f.match(/^photo_([a-z0-9_-]+)_/i) ||
+            f.match(/^screenshot_([a-z0-9_-]+)_/i);
           return match && match[1] === deviceId;
         }
         return true;
@@ -192,6 +194,8 @@ async function listPhotos(req, res) {
         const matchNew = f.match(/^photo_([a-z0-9_-]+)_(front|rear)_([a-z0-9]+)_([a-z0-9]+)_(\d+)\.(jpg|jpeg|png)$/i);
         // Old format: photo_{deviceId}_{camera}_{timestamp}.jpg
         const matchOld = f.match(/^photo_([a-z0-9_-]+)_(front|rear)_(\d+)\.(jpg|jpeg|png)$/i);
+        // Screenshot format: screenshot_{deviceId}_{timestamp}.jpg
+        const matchScreenshot = f.match(/^screenshot_([a-z0-9_-]+)_(\d+)\.(jpg|jpeg|png)$/i);
 
         if (matchNew) {
           devId = matchNew[1];
@@ -203,11 +207,18 @@ async function listPhotos(req, res) {
           devId = matchOld[1];
           camera = matchOld[2];
           ts = parseInt(matchOld[3], 10);
+        } else if (matchScreenshot) {
+          devId = matchScreenshot[1];
+          camera = "screenshot";
+          quality = "screen";
+          ts = parseInt(matchScreenshot[2], 10);
         }
 
         let size = 0;
         try {
-          size = (await fs.promises.stat(fullPath)).size;
+          const stat = await fs.promises.stat(fullPath);
+          size = stat.size;
+          if (!ts) ts = Math.trunc(stat.mtimeMs);
         } catch (_e) {
           size = 0;
         }
@@ -609,6 +620,8 @@ function uploadPhoto(req, res) {
     const matchNew = filename.match(/^photo_([a-z0-9_-]+)_(front|rear)_([a-z0-9]+)_([a-z0-9]+)_(\d+)\.(jpg|jpeg|png)$/i);
     // Old format: photo_{deviceId}_{camera}_{timestamp}.jpg
     const matchOld = filename.match(/^photo_([a-z0-9_-]+)_(front|rear)_(\d+)\.(jpg|jpeg|png)$/i);
+    // Screenshot format: screenshot_{deviceId}_{timestamp}.jpg
+    const matchScreenshot = filename.match(/^screenshot_([a-z0-9_-]+)_(\d+)\.(jpg|jpeg|png)$/i);
 
     if (matchNew) {
       deviceId = deviceId || matchNew[1];
@@ -618,6 +631,10 @@ function uploadPhoto(req, res) {
     } else if (matchOld) {
       deviceId = deviceId || matchOld[1];
       camera = matchOld[2];
+    } else if (matchScreenshot) {
+      deviceId = deviceId || matchScreenshot[1];
+      camera = "screenshot";
+      quality = "screen";
     } else if (!deviceId) {
       const fallbackMatch = filename.match(/^photo_([a-z0-9_-]+)_/i);
       deviceId = fallbackMatch ? fallbackMatch[1] : null;

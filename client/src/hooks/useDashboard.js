@@ -1,5 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiUrl, wsUrlForControl } from '../lib/helpers';
+
+const PHOTO_LIMIT = 50;
+
+const photoIdentity = photo => String(photo?.id || photo?.filename || photo?.url || '');
+
+const mergePhotoList = (incoming, existing = []) => {
+  const merged = new Map();
+
+  [...incoming, ...existing].forEach(photo => {
+    const key = photoIdentity(photo);
+    if (!key) return;
+    merged.set(key, {
+      ...merged.get(key),
+      ...photo
+    });
+  });
+
+  return Array.from(merged.values())
+    .sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime())
+    .slice(0, PHOTO_LIMIT);
+};
+
 export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
   const SELECTED_DEVICE_STORAGE_KEY = 'micmonitor:selectedDeviceId';
   const [wsState, setWsState] = useState('connecting');
@@ -159,7 +181,7 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
     setDevices(prev => prev.filter(item => item.deviceId !== deviceId));
     setSelectedDeviceId(prev => prev === deviceId ? '' : prev);
   }, []);
-  const loadPhotos = useCallback(async deviceId => {
+  const loadPhotos = useCallback(async (deviceId, options = {}) => {
     try {
       const query = deviceId ? `?deviceId=${encodeURIComponent(deviceId)}` : '';
       const res = await fetch(apiUrl(`/api/photos${query}`));
@@ -175,14 +197,14 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
           id: String(item.name || idx),
           filename: String(item.name || ''),
           url: apiUrl(String(item.url || '')),
-          camera: item.camera === 'front' ? 'front' : 'rear',
+          camera: item.camera === 'front' ? 'front' : item.camera === 'screenshot' ? 'screenshot' : 'rear',
           quality: qualityDisplay,
           aiEnhanced: false,
           size: Number(item.size || 0),
           timestamp: new Date(Number(item.ts || Date.now())).toISOString()
         };
       });
-      setPhotos(mapped.slice(0, 50));
+      setPhotos(prev => options.replace ? mapped.slice(0, PHOTO_LIMIT) : mergePhotoList(mapped, prev));
     } catch {
       // Best-effort hydration from backend media index.
     }
@@ -505,14 +527,13 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
               id: String(msg.filename || Date.now()),
               filename: String(msg.filename || ''),
               url: apiUrl(String(msg.url || '')),
-              camera: msg.camera === 'front' ? 'front' : 'rear',
+              camera: msg.camera === 'front' ? 'front' : msg.camera === 'screenshot' ? 'screenshot' : 'rear',
               quality: qualityDisplay,
               aiEnhanced: Boolean(msg.aiEnhanced),
               size: Number(msg.size || 0),
               timestamp: new Date(Number(msg.ts || Date.now())).toISOString()
             };
-            setPhotos(prev => [photo, ...prev].slice(0, 50));
-            void loadPhotos(selectedDeviceIdRef.current);
+            setPhotos(prev => mergePhotoList([photo], prev));
             addFeed(`Photo saved: ${photo.filename}`);
             return;
           }
@@ -680,7 +701,7 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
       connectRef.current = null;
       wsRef.current?.close();
     };
-  }, [addFeed, pushToast, removeDevice, loadPhotos, upsertDevice, mergeDeviceList, setCommandStatus]);
+  }, [addFeed, pushToast, removeDevice, upsertDevice, mergeDeviceList, setCommandStatus]);
   useEffect(() => {
     let stopped = false;
     const loadHealth = async () => {
@@ -734,7 +755,7 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
   }, [mergeDeviceList, setSelectedDeviceId, wsState]);
 
   useEffect(() => {
-    void loadPhotos(selectedDeviceId || undefined);
+    void loadPhotos(selectedDeviceId || undefined, { replace: true });
   }, [loadPhotos, selectedDeviceId]);
   useEffect(() => {
     if (selectedDeviceId) {

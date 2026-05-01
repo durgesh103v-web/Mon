@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 export function CameraLiveFeed({
   frame,
   photos,
@@ -9,13 +9,6 @@ export function CameraLiveFeed({
   const [selectedPhoto, setSelectedPhoto] = useState(null);
   const [rotation, setRotation] = useState(0);
   const [modalRotation, setModalRotation] = useState(0);
-  useEffect(() => {
-    return () => {
-      if (frame?.url && frame.url.startsWith('blob:')) {
-        URL.revokeObjectURL(frame.url);
-      }
-    };
-  }, [frame]);
   return <div className="rounded-lg border border-slate-700/50 bg-slate-800/30 overflow-hidden">
       <div className="flex items-center justify-between px-4 py-2 bg-blue-500/20 border-b border-slate-700/50">
         <div className="flex items-center gap-2">

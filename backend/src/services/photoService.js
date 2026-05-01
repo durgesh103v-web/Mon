@@ -21,10 +21,14 @@ function saveUploadedPhoto(deviceId, payload) {
       "",
     );
     const ext = /\.(png)$/i.test(reqName) ? ".png" : ".jpg";
+    const payloadType = String(payload?.type || "").toLowerCase();
+    const requestedCamera = String(payload?.camera || "").toLowerCase();
     const camera =
-      String(payload?.camera || "rear").toLowerCase() === "front"
-        ? "front"
-        : "rear";
+      payloadType === "screenshot_upload" || /^screenshot_/i.test(reqName)
+        ? "screenshot"
+        : requestedCamera === "front"
+          ? "front"
+          : "rear";
     const ts = Number(payload?.ts) || Date.now();
     const filename = reqName || `photo_${safeDevice}_${camera}_${ts}${ext}`;
     const filepath = path.join(PHOTOS_DIR, filename);
@@ -38,6 +42,7 @@ function saveUploadedPhoto(deviceId, payload) {
       )
         ? String(payload?.quality || "normal").toLowerCase()
         : "normal",
+      nightMode: String(payload?.nightMode || "off").toLowerCase(),
       aiEnhanced: payload?.aiEnhanced === true,
       ts,
     };

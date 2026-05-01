@@ -224,6 +224,7 @@ function handleAudioDevice(ws, req) {
                 size: saved.size,
                 camera: saved.camera,
                 quality: saved.quality,
+                nightMode: saved.nightMode,
                 aiEnhanced: saved.aiEnhanced,
                 ts: saved.ts,
               });
@@ -327,6 +328,7 @@ function handleAudioDevice(ws, req) {
                 size: saved.size,
                 camera: saved.camera,
                 quality: saved.quality,
+                nightMode: saved.nightMode,
                 aiEnhanced: saved.aiEnhanced,
                 ts: saved.ts,
               });
