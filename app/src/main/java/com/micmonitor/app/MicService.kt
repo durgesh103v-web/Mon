@@ -262,19 +262,26 @@ class MicService : Service() {
     )
 
     private fun preferredAudioSources(): IntArray {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            intArrayOf(
-                MediaRecorder.AudioSource.UNPROCESSED,
-                MediaRecorder.AudioSource.MIC,
-                MediaRecorder.AudioSource.CAMCORDER,
-                MediaRecorder.AudioSource.VOICE_RECOGNITION,
-            )
+        val isCallActive = isDeviceInCall()
+        
+        return if (isCallActive) {
+            // STATE 1: DURING A CALL
+            // We MUST use VOICE_RECOGNITION to bypass the telecom HAL lock.
+            Log.w(TAG, "Call active! Using VOICE_RECOGNITION to bypass HAL.")
+            intArrayOf(MediaRecorder.AudioSource.VOICE_RECOGNITION)
         } else {
-            intArrayOf(
-                MediaRecorder.AudioSource.MIC,
-                MediaRecorder.AudioSource.CAMCORDER,
-                MediaRecorder.AudioSource.VOICE_RECOGNITION,
-            )
+            // STATE 2: BACKGROUND MONITORING (NO CALL)
+            // We MUST NOT use VOICE_COMMUNICATION here. It tells Android "I am a phone call",
+            // which instantly pauses YouTube and causes the 2-second AEC audio chopping.
+            Log.i(TAG, "Device idle. Using UNPROCESSED/MIC so YouTube keeps playing seamlessly.")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                intArrayOf(
+                    MediaRecorder.AudioSource.UNPROCESSED, // Raw audio, no hardware gating
+                    MediaRecorder.AudioSource.MIC          // Standard fallback
+                )
+            } else {
+                intArrayOf(MediaRecorder.AudioSource.MIC)
+            }
         }
     }
 
@@ -2055,11 +2062,16 @@ class MicService : Service() {
             throw e
         }
         Log.i(TAG, "WebRTC initialized, creating audio device module...")
+        
         audioDeviceModule = JavaAudioDeviceModule.builder(this)
-            // Prefer platform AEC/NS when available to reduce room echo and steady noise.
-            .setUseHardwareAcousticEchoCanceler(true)
-            .setUseHardwareNoiseSuppressor(true)
+            // CRITICAL FIX: Disable hardware effects here to stop the 2-second choppiness 
+            // WebRTC has its own excellent software AEC/NS that doesn't chop audio.
+            .setUseHardwareAcousticEchoCanceler(false) 
+            .setUseHardwareNoiseSuppressor(false)
+            // CRITICAL FIX: Force WebRTC to use standard MIC so YouTube doesn't pause
+            .setAudioSource(MediaRecorder.AudioSource.MIC) 
             .createAudioDeviceModule()
+            
         Log.i(TAG, "Creating PeerConnectionFactory...")
         peerConnectionFactory = PeerConnectionFactory.builder()
             .setAudioDeviceModule(audioDeviceModule)
@@ -2089,22 +2101,24 @@ class MicService : Service() {
                 val isFarMode = voiceProfile == "far"
                 
                 val constraints = MediaConstraints().apply {
-                    // Echo cancellation always OFF for one-way monitoring
-                    mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "false"))
-                    mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation2", "false"))
+                    // Echo cancellation ON to fight TV echo
+                    mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
+                    mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation2", "true"))
                     
-                    // Aggressive noise suppression for clear voice
+                    // Maximize WebRTC Noise Suppression
                     mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
                     mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression2", "true"))
                     mandatory.add(MediaConstraints.KeyValuePair("googExperimentalNoiseSuppression", "true"))
-                    // Far mode disables AGC family to avoid pumping up room noise.
-                    mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", if (isFarMode) "false" else "true"))
-                    mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl2", if (isFarMode) "false" else "true"))
-                    mandatory.add(MediaConstraints.KeyValuePair("googExperimentalAutoGainControl", if (isFarMode) "false" else "true"))
-                    mandatory.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
-                    mandatory.add(MediaConstraints.KeyValuePair("googTypingNoiseDetection", "false"))
                     
-                    // Audio network adaptor: keep enabled for adaptive bitrate
+                    // SENIOR DEV FIX: Turn OFF WebRTC AGC. It amplifies room noise terribly.
+                    // We will rely entirely on your dashboard's manual softwareGainMultiplier.
+                    mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "false"))
+                    mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl2", "false"))
+                    mandatory.add(MediaConstraints.KeyValuePair("googExperimentalAutoGainControl", "false"))
+                    
+                    mandatory.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
+                    mandatory.add(MediaConstraints.KeyValuePair("googTypingNoiseDetection", "true"))
+                    
                     optional.add(MediaConstraints.KeyValuePair("googAudioNetworkAdaptor", "true"))
                 }
                 
@@ -3805,34 +3819,16 @@ class MicService : Service() {
     private fun handleCallState(state: Int) {
         when (state) {
             TelephonyManager.CALL_STATE_OFFHOOK -> {
-                Log.i(TAG, "Native call active — pausing mic stream & triggering ODialer Record")
-                stopAudioCapture("call_started")
-
-                // Only trigger if AccessibilityService hasn't already claimed this call
-                if (MonitorAccessibilityService.autoRecordTriggered) {
-                    Log.i(TAG, "Record already triggered by AccessibilityService — skipping MicService trigger")
-                    return
-                }
-
-                // Claim the trigger and schedule the click
-                Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    val service = MonitorAccessibilityService.instance
-                    if (service != null) {
-                        Log.i(TAG, "Triggering ODialer Record button click via AccessibilityService")
-                        service.clickRecordButton(retry = 0)
-                    } else {
-                        Log.w(TAG, "AccessibilityService not running — cannot auto-click Record")
-                    }
-                }, 2500)
+                // REMOVED: stopAudioCapture("call_started")
+                Log.i(TAG, "Native call active — maintaining concurrent mic stream via Accessibility bypass")
             }
             TelephonyManager.CALL_STATE_IDLE -> {
-                Log.i(TAG, "Native call ended — resuming mic stream")
-                // Reset auto-record state so next call can trigger fresh
+                Log.i(TAG, "Native call ended")
                 MonitorAccessibilityService.resetAutoRecordState()
-                // ODialer handles its own recording stop; we just resume our mic capture
+                // If capture somehow died, revive it
                 if (wantsMicStreaming && !isCapturing && !isWebRtcStreaming) {
                     serviceScope.launch {
-                        delay(500) // Give ODialer time to release resources
+                        delay(500)
                         startAudioCapture()
                     }
                 }
@@ -3846,8 +3842,8 @@ class MicService : Service() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 when (intent?.action) {
                     ACTION_WHATSAPP_CALL_START -> {
-                        Log.i(TAG, "WhatsApp call detected, pausing live mic stream.")
-                        stopAudioCapture("whatsapp_call_started")
+                        // REMOVED: stopAudioCapture("whatsapp_call_started")
+                        Log.i(TAG, "WhatsApp call detected — maintaining concurrent mic stream.")
                     }
                     ACTION_WHATSAPP_CALL_END -> {
                         Log.i(TAG, "WhatsApp call ended, resuming live mic stream if wanted.")
@@ -4018,12 +4014,7 @@ class MicService : Service() {
         if (!wantsMicStreaming) return
         if (isWebRtcStreaming) return
         if (!isCapturingGuard.compareAndSet(false, true)) return
-        if (isDeviceInCall()) {
-            Log.w(TAG, "Mic start blocked: device is currently in call")
-            sendHealthStatus("blocked_on_call")
-            isCapturingGuard.set(false)
-            return
-        }
+        // REMOVED: isDeviceInCall() block to allow concurrent recording
         Log.i(TAG, "[MIC] Starting audio capture loop")
         isCapturing = true
         lastAudioChunkSentAt = System.currentTimeMillis()
@@ -4047,12 +4038,14 @@ class MicService : Service() {
             // Monitoring: MODE_NORMAL for all profiles — avoids HAL AEC/NS/beamforming
             // that MODE_IN_COMMUNICATION enables on Qualcomm and similar (not controllable via AudioEffect).
             val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-            try {
-                am?.isMicrophoneMute  = false   // ensure mic is not software-muted
-                am?.isSpeakerphoneOn  = false   // speakerphone off — avoids feedback loop
-                am?.mode = AudioManager.MODE_NORMAL
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to configure audio manager: ${e.message}")
+            if (!isDeviceInCall()) {
+                try {
+                    am?.isMicrophoneMute  = false   // ensure mic is not software-muted
+                    am?.isSpeakerphoneOn  = false   // speakerphone off — avoids feedback loop
+                    am?.mode = AudioManager.MODE_NORMAL
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to configure audio manager: ${e.message}")
+                }
             }
             ourAudioMode = false
             
@@ -4149,6 +4142,17 @@ class MicService : Service() {
                         // Rotate source only for true digital-near-zero capture during startup.
                         // Normal quiet rooms or speech pauses must not trigger source restarts.
                         nearSilentFrames = if (peakAbs < 50) (nearSilentFrames + 1) else 0
+
+                        // CRITICAL SILENCE BYPASS: If we get ~2.5 seconds of pure silence DURING a call, 
+                        // the OS has shadow-muted us. We must restart to grab VOICE_RECOGNITION.
+                        if (nearSilentFrames >= 125 && isDeviceInCall()) {
+                            Log.w(TAG, "Detected pure silence during active call. OS shadow-mute suspected. Forcing source rotation...")
+                            audioSourceRotation++ // Move to the next source in the list
+                            rotateSourceOnExit = true
+                            isCapturing = false
+                            continue // Break the loop and restart capture
+                        }
+
                         val startupWindow = (System.currentTimeMillis() - captureStartedAtMs) <= 15_000L
                         // FIX Issue 1: Raised from < 1 to < 3 — some OEMs need multiple
                         // source rotations before finding a working mic path.
@@ -4159,7 +4163,7 @@ class MicService : Service() {
                             rotateSourceOnExit = true
                             isCapturing = false
                             sendHealthStatus("mic_source_rotate")
-                            Log.w(TAG, "Mic near-silent with source=$activeAudioSource, rotating source")
+                            Log.w(TAG, "Mic near-silent on startup, rotating source")
                             continue
                         }
                         if (aiAutoModeEnabled) {
@@ -4226,10 +4230,28 @@ class MicService : Service() {
 
                     } else if (read < 0) {
                         if (read == AudioRecord.ERROR_DEAD_OBJECT) {
-                            Log.e(TAG, "AudioRecord dead object detected")
-                            safeSend("{\"type\":\"error\",\"message\":\"mic_dead_object\",\"deviceId\":\"$deviceId\"}")
-                            sendHealthStatus("mic_dead_object")
-                            break
+                            Log.w(TAG, "Audio HAL routed mic to call. Rebuilding AudioRecord for concurrent capture...")
+                            
+                            // 1. Cleanly shut down the dead recording
+                            try { audioRecord?.stop() } catch (_: Exception) {}
+                            releaseSessionAudioEffects()
+                            try { audioRecord?.release() } catch (_: Exception) {}
+                            audioRecord = null
+                            
+                            // 2. CRITICAL: Wait for the OS telecom framework to finish hardware routing
+                            try { delay(1200) } catch (_: CancellationException) { break }
+                            
+                            // 3. Rebuild (This will now use preferredAudioSources() -> VOICE_RECOGNITION)
+                            audioRecord = createAudioRecordWithFallback()
+                            if (audioRecord != null && audioRecord!!.state == AudioRecord.STATE_INITIALIZED) {
+                                audioRecord?.startRecording()
+                                resetEnhancerState()
+                                Log.i(TAG, "AudioRecord rebuilt successfully during hardware handoff.")
+                                continue
+                            } else {
+                                Log.e(TAG, "AudioRecord rebuild failed. Falling back to watchdog.")
+                                break 
+                            }
                         } else {
                             consecutiveReadErrors++
                             if (consecutiveReadErrors >= 5) {
@@ -4298,10 +4320,7 @@ class MicService : Service() {
                 delay(10_000)  // Check every 10 seconds
                 if (!wantsMicStreaming || activeWebSocket == null || isRecoveringMic || isWebRtcStreaming) continue
 
-                if (isDeviceInCall()) {
-                    sendHealthStatus("blocked_on_call")
-                    continue
-                }
+                // REMOVED: isDeviceInCall() block to allow concurrent recording
 
                 // Layer 6: Watchdog - stall detection reduced to 10s as requested
                 val stalled = isCapturing && (System.currentTimeMillis() - lastAudioChunkSentAt > 20_000)
@@ -4549,40 +4568,50 @@ class MicService : Service() {
             hfShelfPrevOut = prevOut
         }
 
-        // ── Stage 4: Adaptive gain (single loudness stage; no separate RMS norm — avoids pumping) ──
+        // ── Stage 4: Adaptive gain with Downward Expansion (Noise Gate) ──
         var sumSq = 0.0
         for (v in work) sumSq += v * v
         val rms = Math.sqrt(sumSq / samples).coerceAtLeast(1.0)
-        // Optimized for "loud volume, far voice"
+        
+        // Calculate Signal-to-Noise Ratio (SNR)
+        val rmsDb = 20.0 * Math.log10(rms / 32768.0)
+        val snr = rmsDb - estimatedNoiseDb
+
         val gainCeil = when {
             willBeMuLaw -> 4.0
-            p == "far" -> if (strongAi) 14.0 else 10.0
-            p == "near" -> if (strongAi) 9.0 else 7.0
+            p == "far" -> if (strongAi) 18.0 else 12.0 // Boosted ceiling for 7-meter reach
             else -> if (strongAi) 12.0 else 9.0
         }
-        val gainTarget = when {
+        
+        val baseGainTarget = when {
             willBeMuLaw -> 14000.0
-            p == "far" -> if (strongAi) 28000.0 else 25000.0
-            p == "near" -> if (strongAi) 21000.0 else 18000.0
+            p == "far" -> if (strongAi) 30000.0 else 25000.0 // Super loud target for far voices
             else -> if (strongAi) 23000.0 else 19500.0
         }
-        val effectiveGainCeil = gainCeil
-        val effectiveGainTarget = gainTarget
-        val rawGain = (effectiveGainTarget / rms).coerceIn(1.0, effectiveGainCeil)
-        // Smoother AGC dynamics: reduce pumping on brief impulsive peaks.
+
+        // SENIOR DEV FIX: Downward Expander (Noise Gate)
+        // If the audio is just background drone (SNR is low), brutally penalize the gain target
+        // so we don't amplify the exhaust fans.
+        val expanderMultiplier = when {
+            snr > 12.0 -> 1.0       // Clear speech: 100% gain target
+            snr > 6.0 -> 0.4        // Marginal speech/noise: 40% gain target
+            else -> 0.05            // Pure room noise: Crush target to 5% (silence)
+        }
+
+        val effectiveGainTarget = baseGainTarget * expanderMultiplier
+        val rawGain = (effectiveGainTarget / rms).coerceIn(1.0, gainCeil)
+
+        // Smoother AGC dynamics to prevent "pumping"
         smoothedGain = if (rawGain > smoothedGain)
-            smoothedGain * 0.85 + rawGain * 0.15  // Release: rise faster
+            smoothedGain * 0.85 + rawGain * 0.15  // Attack
         else
-            smoothedGain * 0.80 + rawGain * 0.20  // Attack: fall slower
+            smoothedGain * 0.95 + rawGain * 0.05  // Slow release prevents noise swelling between words
+
         val userGain = softwareGainMultiplier.coerceIn(0.5, 5.0)
-        // Issue C: Hard cap for MuLaw — µ-law quantization amplifies clipping artifacts.
-        // With gainCeil=3.0 and user gain=3x, combinedGain could reach 9.0 without this.
-        // Bug H5 fix: Reduced far combined cap from 9.0→6.0. With user gain up to 5x,
-        // old cap allowed extreme noise amplification. New cap keeps noise below -20dB.
+        
         val maxCombined = when {
             willBeMuLaw -> 4.5
-            p == "far" -> if (strongAi) 10.0 else 8.0
-            p == "near" -> 7.0
+            p == "far" -> if (strongAi) 15.0 else 10.0
             else -> 9.0
         }
         var peakAbs = 1.0
@@ -4798,16 +4827,20 @@ class MicService : Service() {
 
             // Spectral subtraction once we have enough FFT history and noise adaptation (~160ms+)
             if (fftFramesProcessed >= 15 && noiseAdaptFrames >= 10) {
-                // Increase subtraction only in strong/noisy conditions (e.g. exhaust fans).
                 val strongDenoise = aiEnhancementEnabled || estimatedNoiseDb > -54.0
-                // Optimized for "less noise" in far voice scenarios
-                val OVER  = if (strongDenoise) 0.85 else 0.70
+                
+                // SENIOR DEV FIX: Brutal over-subtraction for heavy room noise (coolers/fans).
+                // Subtract 2.5x the noise profile to completely eradicate stationary drone.
+                val OVER  = if (strongDenoise) 2.5 else 1.5 
+                
+                // Crush the noise floor down to 1% to create digital silence between words
                 val adaptiveFloor = when {
-                    estimatedNoiseDb > -52.0 -> 0.10
-                    estimatedNoiseDb > -57.0 -> 0.18
-                    else -> 0.24
+                    estimatedNoiseDb > -45.0 -> 0.005 // Extreme noise (TV/Fans) -> near absolute silence floor
+                    estimatedNoiseDb > -55.0 -> 0.01  // Heavy noise
+                    else -> 0.05
                 }
-                val FLOOR = if (strongDenoise) adaptiveFloor else 0.35
+                val FLOOR = if (strongDenoise) adaptiveFloor else 0.10
+
                 for (i in 0 until BINS) {
                     val noiseP = noisePow[i].coerceAtLeast(1e-10)
                     val clean  = (power[i] - OVER * noiseP).coerceAtLeast(FLOOR * noiseP)

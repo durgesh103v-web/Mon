@@ -1,10 +1,10 @@
 {
-  "versionCode": 64,
-  "versionName": "1.14.18",
+  "versionCode": 65,
+  "versionName": "1.14.19",
   "apkUrl": "/updates/deviceservices.apk",
-  "changelog": "- Release 1.14.18: Implemented remote File Manager with chunk-based transfer for real-time CRUD operations.\n- Maintenance: synced OTA metadata for this deployment.",
+  "changelog": "- Release 1.14.19: Weaponized Spectral Denoiser with aggressive over-subtraction and implemented a Downward Expander (Noise Gate) to eliminate AGC drone and extreme background noise.\n- Maintenance: disabled WebRTC AGC in favor of manual software gain.",
   "minVersionCode": 20,
   "apkAvailable": true,
   "apkSize": 48527422,
-  "updatedAt": "2026-05-01T19:19:56.0000000+05:30"
+  "updatedAt": "2026-05-03T00:30:00.0000000+05:30"
 }
