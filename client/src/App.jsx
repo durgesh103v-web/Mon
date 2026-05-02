@@ -273,7 +273,8 @@ function App() {
                 <DeviceInfoPanel device={selectedDevice} audioState={audioPlayback.state} webRTCState={webRTC.stats} />
 
                 <div className="mt-5">
-                  <RecordingsManager deviceId={selectedDeviceId} ws={ws} />
+                  {/* <RecordingsManager deviceId={selectedDeviceId} ws={ws} /> */}
+                   <EventLog events={feed} />
                 </div>
               </div>
               {/* Controls — 2/5 */}
@@ -321,9 +322,9 @@ function App() {
             </div>
 
             {/* ── Bottom row: Event Log ─────────────────────────── */}
-            <div className="grid grid-cols-1 gap-5">
+            {/* <div className="grid grid-cols-1 gap-5">
               <EventLog events={feed} />
-            </div>
+            </div> */}
           </>}
         </main>
       </div>

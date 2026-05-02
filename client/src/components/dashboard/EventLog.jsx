@@ -76,7 +76,7 @@ export function EventLog({
       </div>
 
       {/* Log entries */}
-      <div ref={listRef} className="p-3 max-h-52 overflow-y-auto space-y-1" style={{
+      <div ref={listRef} className="p-4 max-h-52 overflow-y-auto space-y-1" style={{
       scrollbarWidth: 'thin',
       scrollbarColor: 'rgba(99,102,241,0.2) transparent'
     }}>
