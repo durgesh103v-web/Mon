@@ -121,42 +121,33 @@ export function useAudioPlayback() {
     });
     audioContextRef.current = ctx;
 
-    // ── Audio processing chain for far-voice clarity ──
-    // Source → Compressor → Highpass → Gain → Destination
+    // ── Audio processing chain ──
+    // SENIOR DEV FIX: Removed the DynamicsCompressor. Android handles dynamics.
     
-    // 1. DynamicsCompressor: auto-levels quiet far-field speech
-    const compressor = ctx.createDynamicsCompressor();
-    compressor.threshold.value = -18;   // Start compressing at -18dB (catches quiet speech)
-    compressor.knee.value = 20;         // Soft knee for natural sound
-    compressor.ratio.value = 3;         // Gentle leveling, not hard limiting
-    compressor.attack.value = 0.003;    // Fast attack to catch speech transients
-    compressor.release.value = 0.25;    // Slower release to avoid pumping
-
-    // 2. Highpass filter: removes low-frequency hum/rumble
+    // 1. Highpass filter: removes low-frequency hum/rumble from laptop speakers
     const highpass = ctx.createBiquadFilter();
     highpass.type = 'highpass';
     highpass.frequency.value = 110;
     highpass.Q.value = 0.7;
 
-    // 3. Notch filter: suppress mains hum around 60Hz
+    // 2. Notch filter: suppress mains hum around 60Hz
     const notch = ctx.createBiquadFilter();
     notch.type = 'notch';
     notch.frequency.value = 60;
     notch.Q.value = 12;
 
-    // 4. Low-shelf cut: reduce bass buildup without thinning speech
+    // 3. Low-shelf cut: reduce bass buildup without thinning speech
     const lowShelf = ctx.createBiquadFilter();
     lowShelf.type = 'lowshelf';
     lowShelf.frequency.value = 180;
     lowShelf.gain.value = -4;
 
-    // 5. Gain node: final volume boost
+    // 4. Gain node: purely maps to the UI volume slider (1.0 = baseline)
     const gainNode = ctx.createGain();
-    gainNode.gain.value = volumeRef.current * 2.2;  // Lower boost to avoid amplifying noise
+    gainNode.gain.value = volumeRef.current * 1.0; 
     gainNodeRef.current = gainNode;
 
-    // Connect chain: compressor → highpass → notch → low-shelf → gain → output
-    compressor.connect(highpass);
+    // Connect chain: highpass → notch → low-shelf → gain → output
     highpass.connect(notch);
     notch.connect(lowShelf);
     lowShelf.connect(gainNode);
@@ -266,7 +257,7 @@ export function useAudioPlayback() {
             }));
           }
         };
-        node.connect(compressor);
+        node.connect(highpass);
         workletNodeRef.current = node;
         usingWorkletRef.current = true;
         return;
@@ -321,7 +312,7 @@ export function useAudioPlayback() {
         }));
       }
     };
-    scriptProcessor.connect(compressor);
+    scriptProcessor.connect(highpass);
     scriptProcessorRef.current = scriptProcessor;
     usingWorkletRef.current = false;
   }, []); // S-M5 fix: Empty dependency — volume is accessed via volumeRef
@@ -426,7 +417,7 @@ export function useAudioPlayback() {
     // S-M5 fix: Update ref so initAudioContext always has current volume
     volumeRef.current = clamped;
     if (gainNodeRef.current) {
-      gainNodeRef.current.gain.value = clamped * 3.0;  // Match initAudioContext base boost
+      gainNodeRef.current.gain.value = clamped * 1.0;  // Match initAudioContext base boost
     }
     setState(prev => ({
       ...prev,

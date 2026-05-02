@@ -381,8 +381,10 @@ function handleAudioDevice(ws, req) {
       return;
     }
 
-    const serverGain = 2.5;
-    const needsDecodedAudio = true;  // Always decode+amplify for far-voice clarity
+    // SENIOR DEV FIX: Let the Android device handle the DSP. 
+    // The backend must act as a clean passthrough to preserve the SNR.
+    const serverGain = 1.0; 
+    const needsDecodedAudio = false;
     let parsedAudio = null;
     let forwardedPayload = buf;
 

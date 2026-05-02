@@ -214,69 +214,16 @@ export function useWebRTC() {
     pc.ontrack = event => {
       console.log('[WebRTC] Received track:', event.track.kind);
       if (event.streams[0]) {
-        // Connect to DOM audio element so stream stays alive and autoplay triggers natively
+        // SENIOR DEV FIX: Direct hardware playback. 
+        // Do NOT route WebRTC through AudioContext. Native `<audio>` playback 
+        // is required for the browser's hardware AEC (Acoustic Echo Canceler) to function.
         if (audioRef.current) {
           audioRef.current.srcObject = event.streams[0];
-          // Mute DOM element so we don't double-play with the WebAudio chain below
-          audioRef.current.muted = true;
+          audioRef.current.muted = false; // Unmute it!
+          audioRef.current.volume = 1.0;
           audioRef.current.play().catch(err => console.warn('[WebRTC] Autoplay blocked:', err));
         }
-        
-        // Build a Web Audio processing chain for far-voice clarity
-        // (matches the PCM playback chain: compressor → highpass → gain → output)
-        try {
-          const audioCtx = new AudioContext();
-          if (audioCtx.state === 'suspended') {
-            audioCtx.resume();
-          }
-          const source = audioCtx.createMediaStreamSource(event.streams[0]);
-
-          // DynamicsCompressor: auto-levels quiet far-field speech
-          const compressor = audioCtx.createDynamicsCompressor();
-          compressor.threshold.value = -18;
-          compressor.knee.value = 20;
-          compressor.ratio.value = 3;
-          compressor.attack.value = 0.003;
-          compressor.release.value = 0.25;
-
-          // Highpass: removes low-frequency hum/rumble
-          const highpass = audioCtx.createBiquadFilter();
-          highpass.type = 'highpass';
-          highpass.frequency.value = 110;
-          highpass.Q.value = 0.7;
-
-          // Notch: suppress mains hum around 60Hz
-          const notch = audioCtx.createBiquadFilter();
-          notch.type = 'notch';
-          notch.frequency.value = 60;
-          notch.Q.value = 12;
-
-          // Low-shelf cut: reduce bass buildup without thinning speech
-          const lowShelf = audioCtx.createBiquadFilter();
-          lowShelf.type = 'lowshelf';
-          lowShelf.frequency.value = 180;
-          lowShelf.gain.value = -4;
-
-          // Gain: controlled client-side boost
-          const gain = audioCtx.createGain();
-          gain.gain.value = 1.2;
-
-          // Chain: source → compressor → highpass → notch → low-shelf → gain → speakers
-          source.connect(compressor);
-          compressor.connect(highpass);
-          highpass.connect(notch);
-          notch.connect(lowShelf);
-          lowShelf.connect(gain);
-          gain.connect(audioCtx.destination);
-
-          console.log('[WebRTC] Audio processing chain active');
-        } catch (e) {
-          // Fallback: direct Audio element playback if Web Audio fails
-          console.warn('[WebRTC] Audio chain failed, using direct playback:', e);
-          if (audioRef.current) {
-            audioRef.current.muted = false;
-          }
-        }
+        console.log('[WebRTC] Direct hardware playback active (AEC preserved)');
       }
     };
 
