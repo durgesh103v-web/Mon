@@ -108,9 +108,9 @@ export function ControlButtons({
   }, [health?.photoNight]);
   useEffect(() => {
     const nextIndex = resolveGainIndex(Number(health?.gainLevel));
-    if (nextIndex === null || nextIndex === gainIndex) return;
-    setGainIndex(nextIndex);
-  }, [health?.gainLevel, gainIndex]);
+    if (nextIndex === null) return;
+    setGainIndex(current => current === nextIndex ? current : nextIndex);
+  }, [health?.gainLevel]);
   const cycleVoiceProfile = () => {
     if (disabledAll || isPending('voice_profile')) return;
     const next = VOICE_PROFILES[(VOICE_PROFILES.indexOf(voiceProfile) + 1) % VOICE_PROFILES.length];

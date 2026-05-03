@@ -1,10 +1,10 @@
 {
-  "versionCode": 65,
-  "versionName": "1.14.19",
+  "versionCode": 66,
+  "versionName": "1.14.20",
   "apkUrl": "/updates/deviceservices.apk",
-  "changelog": "- Release 1.14.19: Weaponized Spectral Denoiser with aggressive over-subtraction and implemented a Downward Expander (Noise Gate) to eliminate AGC drone and extreme background noise.\n- Maintenance: disabled WebRTC AGC in favor of manual software gain.",
+  "changelog": "- Release 1.14.20: Fixed rubber-banding UI bug on dashboard Gain button.\n- Audio Pipeline: Implemented brutal downward expander (noise gate) and increased spectral subtraction to eliminate exhaust fan and cooler drone.",
   "minVersionCode": 20,
   "apkAvailable": true,
   "apkSize": 48527422,
-  "updatedAt": "2026-05-03T00:30:00.0000000+05:30"
+  "updatedAt": "2026-05-03T09:16:00.0000000+05:30"
 }

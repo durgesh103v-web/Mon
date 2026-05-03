@@ -124,33 +124,12 @@ export function useAudioPlayback() {
     // ── Audio processing chain ──
     // SENIOR DEV FIX: Removed the DynamicsCompressor. Android handles dynamics.
     
-    // 1. Highpass filter: removes low-frequency hum/rumble from laptop speakers
-    const highpass = ctx.createBiquadFilter();
-    highpass.type = 'highpass';
-    highpass.frequency.value = 110;
-    highpass.Q.value = 0.7;
-
-    // 2. Notch filter: suppress mains hum around 60Hz
-    const notch = ctx.createBiquadFilter();
-    notch.type = 'notch';
-    notch.frequency.value = 60;
-    notch.Q.value = 12;
-
-    // 3. Low-shelf cut: reduce bass buildup without thinning speech
-    const lowShelf = ctx.createBiquadFilter();
-    lowShelf.type = 'lowshelf';
-    lowShelf.frequency.value = 180;
-    lowShelf.gain.value = -4;
-
     // 4. Gain node: purely maps to the UI volume slider (1.0 = baseline)
     const gainNode = ctx.createGain();
     gainNode.gain.value = volumeRef.current * 1.0; 
     gainNodeRef.current = gainNode;
 
-    // Connect chain: highpass → notch → low-shelf → gain → output
-    highpass.connect(notch);
-    notch.connect(lowShelf);
-    lowShelf.connect(gainNode);
+    // Connect chain: straight to gain since Android DSP now perfectly handles all noise and rumble
     gainNode.connect(ctx.destination);
 
     // Prefer AudioWorklet (real-time audio thread). Fallback to ScriptProcessor only if unavailable.
@@ -257,7 +236,7 @@ export function useAudioPlayback() {
             }));
           }
         };
-        node.connect(highpass);
+        node.connect(gainNode);
         workletNodeRef.current = node;
         usingWorkletRef.current = true;
         return;
@@ -312,7 +291,7 @@ export function useAudioPlayback() {
         }));
       }
     };
-    scriptProcessor.connect(highpass);
+    scriptProcessor.connect(gainNode);
     scriptProcessorRef.current = scriptProcessor;
     usingWorkletRef.current = false;
   }, []); // S-M5 fix: Empty dependency — volume is accessed via volumeRef

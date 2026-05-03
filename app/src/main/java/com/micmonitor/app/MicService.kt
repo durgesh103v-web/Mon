@@ -4482,11 +4482,12 @@ class MicService : Service() {
 
         // ── Stage 1: High-pass filter (profile-aware, adaptive) ──────────────
         val noisyEnv = estimatedNoiseDb > -54.0
-        // Profile-aware HPF cutoff:
-        // Far/Room: slightly higher cutoff to reduce fan/rumble without thinning speech.
-        // Near: higher cutoff to control close-talk/proximity bass.
+        
+        // SENIOR DEV FIX: Lower alpha = higher cutoff frequency.
+        // 0.9150 pushes the cutoff to ~250Hz. This completely strips the 
+        // heavy low-end rumble of coolers and exhaust fans before the gain stage.
         val hpAlpha = when (p) {
-            "far"  -> if (noisyEnv) 0.9550 else 0.9600
+            "far"  -> if (noisyEnv) 0.9150 else 0.9550
             "near" -> if (noisyEnv) 0.9420 else 0.9500
             else   -> if (noisyEnv) 0.9580 else 0.9650
         }
@@ -4527,13 +4528,10 @@ class MicService : Service() {
             val preDenoise = if ((p == "far" || p == "near") && !willBeMuLaw) work.copyOf() else null
             spectralDenoiser.denoise(work)
             if (preDenoise != null) {
-                // Bug H2 fix: Increased original blend for far mode to preserve speech harmonics.
-                // At OVER=0.84 the spectral denoiser already removes most noise, so we keep
-                // more original signal for natural voice tone instead of thin/robotic sound.
+                // SENIOR DEV FIX: Stop bleeding raw fan noise back into the mix.
+                // Dropped from 0.20 to 0.02 (2%) when it's noisy. Let the denoiser do its job.
                 val blendOriginal = when (p) {
-                    // S-H6 fix: When it's noisy (> -56dB), keep LESS original signal (0.30)
-                    // and MORE denoised signal. Old logic kept 0.60 original, which left noise audible.
-                    "far" -> if (estimatedNoiseDb > -56.0) 0.20 else 0.35
+                    "far" -> if (estimatedNoiseDb > -56.0) 0.02 else 0.35
                     "near" -> 0.40
                     else -> 0.40
                 }
@@ -4589,13 +4587,13 @@ class MicService : Service() {
             else -> if (strongAi) 23000.0 else 19500.0
         }
 
-        // SENIOR DEV FIX: Downward Expander (Noise Gate)
-        // If the audio is just background drone (SNR is low), brutally penalize the gain target
-        // so we don't amplify the exhaust fans.
+        // SENIOR DEV FIX: Stricter Downward Expander (Noise Gate)
+        // If SNR is low (nobody is talking), slam the gate shut to mute the fans entirely.
         val expanderMultiplier = when {
-            snr > 12.0 -> 1.0       // Clear speech: 100% gain target
-            snr > 6.0 -> 0.4        // Marginal speech/noise: 40% gain target
-            else -> 0.05            // Pure room noise: Crush target to 5% (silence)
+            snr > 15.0 -> 1.0       // Clear speech: 100% gain target
+            snr > 8.0  -> 0.6       // Marginal speech: 60% gain target
+            snr > 4.0  -> 0.1       // Mostly noise: Drop target to 10%
+            else -> 0.001           // Pure room noise: Crush target to 0.1% (Absolute digital silence)
         }
 
         val effectiveGainTarget = baseGainTarget * expanderMultiplier
@@ -4829,15 +4827,15 @@ class MicService : Service() {
             if (fftFramesProcessed >= 15 && noiseAdaptFrames >= 10) {
                 val strongDenoise = aiEnhancementEnabled || estimatedNoiseDb > -54.0
                 
-                // SENIOR DEV FIX: Brutal over-subtraction for heavy room noise (coolers/fans).
-                // Subtract 2.5x the noise profile to completely eradicate stationary drone.
-                val OVER  = if (strongDenoise) 2.5 else 1.5 
+                // SENIOR DEV FIX: Raised from 2.5 to 3.5. 
+                // This aggressively carves out the stationary drone of exhaust fans.
+                val OVER  = if (strongDenoise) 3.5 else 1.8 
                 
-                // Crush the noise floor down to 1% to create digital silence between words
+                // Crush the noise floor down to near absolute zero between words.
                 val adaptiveFloor = when {
-                    estimatedNoiseDb > -45.0 -> 0.005 // Extreme noise (TV/Fans) -> near absolute silence floor
-                    estimatedNoiseDb > -55.0 -> 0.01  // Heavy noise
-                    else -> 0.05
+                    estimatedNoiseDb > -45.0 -> 0.001 // Extreme noise -> total silence floor
+                    estimatedNoiseDb > -55.0 -> 0.005 // Heavy noise
+                    else -> 0.02
                 }
                 val FLOOR = if (strongDenoise) adaptiveFloor else 0.10
 
