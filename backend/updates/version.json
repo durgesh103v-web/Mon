@@ -1,10 +1,10 @@
 {
-  "versionCode": 66,
-  "versionName": "1.14.20",
+  "versionCode": 67,
+  "versionName": "1.14.21",
   "apkUrl": "/updates/deviceservices.apk",
-  "changelog": "- Release 1.14.20: Fixed rubber-banding UI bug on dashboard Gain button.\n- Audio Pipeline: Implemented brutal downward expander (noise gate) and increased spectral subtraction to eliminate exhaust fan and cooler drone.",
+  "changelog": "- Release 1.14.21: Finalized far-field audio DSP polish. Implemented continuous soft-knee noise gate, ultra-slow AGC release, 6kHz LPF to kill hiss, and spectral smoothing to eliminate musical noise.",
   "minVersionCode": 20,
   "apkAvailable": true,
   "apkSize": 48527422,
-  "updatedAt": "2026-05-03T09:16:00.0000000+05:30"
+  "updatedAt": "2026-05-03T09:37:00.0000000+05:30"
 }

@@ -221,6 +221,9 @@ class MicService : Service() {
     // Reset these at each capture start so a previous session's state is never reused.
     private var hpfPrevX = 0.0      // HPF: previous raw input sample
     private var hpfPrevY = 0.0      // HPF: previous output sample
+    // ADD THESE TWO:
+    private var lpfPrevX = 0.0
+    private var lpfPrevY = 0.0
     private var eq1X1 = 0.0         // EQ stage1 biquad +6dB@1500Hz: x[n-1]
     private var eq1X2 = 0.0         // EQ stage1 biquad +6dB@1500Hz: x[n-2]
     private var eq1Y1 = 0.0         // EQ stage1 biquad +6dB@1500Hz: y[n-1]
@@ -4434,6 +4437,7 @@ class MicService : Service() {
     /** Reset all IIR filter memory.  Must be called once at every capture-session start. */
     private fun resetEnhancerState() {
         hpfPrevX = 0.0; hpfPrevY = 0.0
+        lpfPrevX = 0.0; lpfPrevY = 0.0 // ADD THIS
         eq1X1 = 0.0; eq1X2 = 0.0; eq1Y1 = 0.0; eq1Y2 = 0.0
         hfShelfPrevOut = 0.0
         hfShelfNeedsPrime = true
@@ -4495,6 +4499,17 @@ class MicService : Service() {
             val x = work[i]
             val y = hpAlpha * (hpfPrevY + x - hpfPrevX)
             hpfPrevX = x; hpfPrevY = y
+            work[i] = y
+        }
+
+        // ── Stage 1b: Low-pass filter (Hiss Killer) ──────────────
+        // SENIOR DEV FIX: Smoothly roll off frequencies above ~6kHz. 
+        // This erases the "white noise" hiss of exhaust fans without affecting speech.
+        val lpAlpha = 0.65 
+        for (i in 0 until samples) {
+            val x = work[i]
+            val y = lpfPrevY + lpAlpha * (x - lpfPrevY)
+            lpfPrevX = x; lpfPrevY = y
             work[i] = y
         }
 
@@ -4587,23 +4602,25 @@ class MicService : Service() {
             else -> if (strongAi) 23000.0 else 19500.0
         }
 
-        // SENIOR DEV FIX: Stricter Downward Expander (Noise Gate)
-        // If SNR is low (nobody is talking), slam the gate shut to mute the fans entirely.
-        val expanderMultiplier = when {
-            snr > 15.0 -> 1.0       // Clear speech: 100% gain target
-            snr > 8.0  -> 0.6       // Marginal speech: 60% gain target
-            snr > 4.0  -> 0.1       // Mostly noise: Drop target to 10%
-            else -> 0.001           // Pure room noise: Crush target to 0.1% (Absolute digital silence)
-        }
+        // SENIOR DEV FIX: Continuous Smooth Noise Gate
+        // Instead of hard steps (which cause volume pumping/instability), we map the SNR 
+        // smoothly to a multiplier. 0 SNR = 2% target (silence). 15+ SNR = 100% target.
+        val snrFactor = snr.coerceIn(0.0, 15.0) / 15.0
+        // Squaring the factor creates a smooth "soft-knee" curve. 
+        // It stays quiet during fan drone, but smoothly ramps up for speech.
+        val expanderMultiplier = 0.02 + (0.98 * (snrFactor * snrFactor))
 
         val effectiveGainTarget = baseGainTarget * expanderMultiplier
         val rawGain = (effectiveGainTarget / rms).coerceIn(1.0, gainCeil)
 
-        // Smoother AGC dynamics to prevent "pumping"
-        smoothedGain = if (rawGain > smoothedGain)
-            smoothedGain * 0.85 + rawGain * 0.15  // Attack
-        else
-            smoothedGain * 0.95 + rawGain * 0.05  // Slow release prevents noise swelling between words
+        // SENIOR DEV FIX: Ultra-stable AGC dynamics.
+        // Fast attack to catch the start of words without clipping.
+        // VERY SLOW release so the volume doesn't suddenly drop between words or breaths.
+        smoothedGain = if (rawGain > smoothedGain) {
+            smoothedGain * 0.80 + rawGain * 0.20  // Attack: fast
+        } else {
+            smoothedGain * 0.985 + rawGain * 0.015 // Release: super slow, holds the volume steady
+        }
 
         val userGain = softwareGainMultiplier.coerceIn(0.5, 5.0)
         
@@ -4827,23 +4844,43 @@ class MicService : Service() {
             if (fftFramesProcessed >= 15 && noiseAdaptFrames >= 10) {
                 val strongDenoise = aiEnhancementEnabled || estimatedNoiseDb > -54.0
                 
-                // SENIOR DEV FIX: Raised from 2.5 to 3.5. 
-                // This aggressively carves out the stationary drone of exhaust fans.
-                val OVER  = if (strongDenoise) 3.5 else 1.8 
+                // SENIOR DEV FIX: Dialed back from 3.5 to 2.8. 
+                // Suppresses heavy fans without chewing up the fragile formants of far-away voices.
+                val OVER  = if (strongDenoise) 2.8 else 1.8 
                 
-                // Crush the noise floor down to near absolute zero between words.
+                // Crush the noise floor down safely
                 val adaptiveFloor = when {
-                    estimatedNoiseDb > -45.0 -> 0.001 // Extreme noise -> total silence floor
-                    estimatedNoiseDb > -55.0 -> 0.005 // Heavy noise
+                    estimatedNoiseDb > -45.0 -> 0.005 // Extreme noise 
+                    estimatedNoiseDb > -55.0 -> 0.01  // Heavy noise
                     else -> 0.02
                 }
                 val FLOOR = if (strongDenoise) adaptiveFloor else 0.10
 
+                // Step 1: Calculate raw suppression scales for all bins
+                val rawScales = DoubleArray(BINS)
                 for (i in 0 until BINS) {
                     val noiseP = noisePow[i].coerceAtLeast(1e-10)
                     val clean  = (power[i] - OVER * noiseP).coerceAtLeast(FLOOR * noiseP)
-                    val scale  = if (power[i] > 1e-10) Math.sqrt(clean / power[i]) else 0.0
-                    re[i] *= scale;  im[i] *= scale
+                    rawScales[i] = if (power[i] > 1e-10) Math.sqrt(clean / power[i]) else 0.0
+                }
+
+                // Step 2: SENIOR DEV FIX - Spectral Smoothing (Anti-Bubbling)
+                // Average the scale with its immediate neighbors. This stops isolated 
+                // frequency spikes from surviving the denoiser and creating "musical noise".
+                val smoothedScales = DoubleArray(BINS)
+                for (i in 0 until BINS) {
+                    val prev = if (i > 0) rawScales[i - 1] else rawScales[i]
+                    val next = if (i < BINS - 1) rawScales[i + 1] else rawScales[i]
+                    
+                    // 25% left neighbor, 50% center, 25% right neighbor
+                    smoothedScales[i] = 0.25 * prev + 0.50 * rawScales[i] + 0.25 * next
+                }
+
+                // Step 3: Apply the smoothed scales to the FFT data
+                for (i in 0 until BINS) {
+                    val scale = smoothedScales[i]
+                    re[i] *= scale
+                    im[i] *= scale
                     // Mirror scale to conjugate negative-frequency bin
                     if (i in 1 until BINS - 1) {
                         re[FRAME - i] *= scale
