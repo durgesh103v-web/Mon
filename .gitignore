@@ -1,0 +1,19 @@
+# Android
+**/build/
+*.apk
+*.jks
+*.keystore
+app/google-services.json
+
+# Backend
+backend/node_modules/
+backend/recordings/
+backend/.env
+backend/firebase-adminsdk-key.json
+
+# OS/IDE
+.idea/
+.gradle/
+*.iml
+local.properties
+.DS_Store

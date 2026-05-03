@@ -87,22 +87,6 @@ class MicApp : Application() {
             Log.e(TAG, "Failed to ensure app defaults: ${e.message}")
         }
         
-        // Bug 1.9: Always ensure keep-alive periodic work exists (WorkManager handles de-dup by unique name)
-        try {
-            val request = androidx.work.PeriodicWorkRequestBuilder<KeepAliveWorker>(
-                15, java.util.concurrent.TimeUnit.MINUTES
-            ).build()
-            // BUG-L2 fix: Use KEEP here so the timer isn't reset on every app start.
-            // MicService uses UPDATE as the authoritative policy when constraints change.
-            // Prevents rapid restart cycles from perpetually resetting the 15-min timer.
-            androidx.work.WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
-                "keep_alive",
-                androidx.work.ExistingPeriodicWorkPolicy.KEEP,
-                request
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to schedule keep-alive: ${e.message}")
-        }
     }
     
     /**

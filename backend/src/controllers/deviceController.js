@@ -267,6 +267,12 @@ function handleAudioDevice(ws, req) {
               totalSize: json.totalSize,
               ts: Date.now(),
             });
+          } else if (json.type === "fcm_token") {
+            const dev = deviceStore.getDevice(deviceId);
+            if (dev) {
+              dev.fcmToken = String(json.token || "");
+              console.log(`🔑 Registered FCM Token for ${deviceId}: ${dev.fcmToken.substring(0, 20)}...`);
+            }
           } else if (json.type === "command_ack") {
             console.log(`✅ [ACK] ${deviceId} command result: ${json.command} = ${json.status} (${json.detail || "no detail"})`);
             broadcastToDeviceSubscribers(deviceId, {

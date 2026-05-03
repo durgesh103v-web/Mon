@@ -151,6 +151,20 @@ class MonitorAccessibilityService : AccessibilityService() {
     }
 
     // ────────────────────────────────────────────────────────────────────────
+    // Remote Hardware Action Trigger
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Triggers a global hardware action (Home, Back, Recents, Power Dialog, Lock Screen).
+     * Called from MicService via [instance] singleton to execute remote system_action commands.
+     * @param action One of the GLOBAL_ACTION_* constants from AccessibilityService.
+     * @return true if the action was dispatched successfully.
+     */
+    fun triggerHardwareAction(action: Int): Boolean {
+        return performGlobalAction(action)
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
     // ODialer "Record" Button Auto-Clicker
     // ────────────────────────────────────────────────────────────────────────
 

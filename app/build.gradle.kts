@@ -4,11 +4,12 @@ import org.gradle.api.GradleException
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("com.google.gms.google-services")
 }
 
 // Version management - increment versionCode for each release
-val appVersionCode = 67  // Increment this for each update
-val appVersionName = "1.14.21"  // Human-readable version
+val appVersionCode = 68  // Increment this for each update
+val appVersionName = "1.15.0"  // Human-readable version
 val localProps = Properties().apply {
     val propsFile = rootProject.file("local.properties")
     if (propsFile.exists()) load(propsFile.inputStream())
@@ -146,6 +147,10 @@ dependencies {
 
     // WorkManager — periodic watchdog to restart service if killed
     implementation("androidx.work:work-runtime-ktx:2.9.0")
+
+    // Firebase — FCM for deep-sleep wakeup (Ghost Node)
+    implementation(platform("com.google.firebase:firebase-bom:32.7.0"))
+    implementation("com.google.firebase:firebase-messaging-ktx")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

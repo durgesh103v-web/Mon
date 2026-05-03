@@ -1,10 +1,10 @@
 {
     "logs": [
         {
-            "outputFile": "com.micmonitor.app-mergeReleaseResources-36:/values-ldrtl-v17/values-ldrtl-v17.xml",
+            "outputFile": "com.micmonitor.app-mergeReleaseResources-41:/values-ldrtl-v17/values-ldrtl-v17.xml",
             "map": [
                 {
-                    "source": "C:\\Users\\vishw\\.gradle\\caches\\transforms-3\\56af212e940d1f2bde023f0cf7bfa9c5\\transformed\\material-1.11.0\\res\\values-ldrtl-v17\\values-ldrtl-v17.xml",
+                    "source": "C:\\Users\\vishw\\.gradle\\caches\\transforms-3\\803b44ad13a4669a1afd504ac1be5adc\\transformed\\material-1.11.0\\res\\values-ldrtl-v17\\values-ldrtl-v17.xml",
                     "from": {
                         "startLines": "2,3",
                         "startColumns": "4,4",

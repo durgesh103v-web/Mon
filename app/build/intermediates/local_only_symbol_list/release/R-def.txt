@@ -8,10 +8,16 @@ string app_name
 string app_subtitle
 string btn_grant_permissions
 string desc_permissions
+string gcm_defaultSenderId
+string google_api_key
+string google_app_id
+string google_crash_reporting_api_key
+string google_storage_bucket
 string perm_audio
 string perm_camera
 string perm_location
 string perm_sms
+string project_id
 string status_denied
 string status_requesting
 string status_retry

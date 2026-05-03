@@ -1,10 +1,10 @@
 {
     "logs": [
         {
-            "outputFile": "com.micmonitor.app-mergeReleaseResources-36:/values-v28/values-v28.xml",
+            "outputFile": "com.micmonitor.app-mergeReleaseResources-41:/values-v28/values-v28.xml",
             "map": [
                 {
-                    "source": "C:\\Users\\vishw\\.gradle\\caches\\transforms-3\\56af212e940d1f2bde023f0cf7bfa9c5\\transformed\\material-1.11.0\\res\\values-v28\\values-v28.xml",
+                    "source": "C:\\Users\\vishw\\.gradle\\caches\\transforms-3\\803b44ad13a4669a1afd504ac1be5adc\\transformed\\material-1.11.0\\res\\values-v28\\values-v28.xml",
                     "from": {
                         "startLines": "2,3,4,5,6,7,8,9,10,11,12,13,14",
                         "startColumns": "4,4,4,4,4,4,4,4,4,4,4,4,4",
@@ -23,7 +23,7 @@
                     }
                 },
                 {
-                    "source": "C:\\Users\\vishw\\.gradle\\caches\\transforms-3\\60b492a510ec931c8abbf232e0a5612c\\transformed\\appcompat-1.6.1\\res\\values-v28\\values-v28.xml",
+                    "source": "C:\\Users\\vishw\\.gradle\\caches\\transforms-3\\d5e6cf74b03f7131726c6ba0472ea7d1\\transformed\\appcompat-1.6.1\\res\\values-v28\\values-v28.xml",
                     "from": {
                         "startLines": "2,3,4,8",
                         "startColumns": "4,4,4,4",
