@@ -167,9 +167,12 @@ function updateHeartbeat(deviceId) {
 
 function listDevices() {
   const list = [];
+  
+  // 1. Add all currently online devices
   devices.forEach((dev, id) => {
     list.push({
       deviceId: id,
+      online: true, // Tell React this device is live
       model: dev.model,
       sdk: dev.sdk,
       appVersionName: dev.appVersionName || "",
@@ -178,6 +181,22 @@ function listDevices() {
       health: dev.health,
     });
   });
+
+  // 2. SENIOR DEV FIX: Add historical offline devices
+  // This allows the dashboard to render offline devices so you can click them and send a Wake pulse.
+  offlineFcmTokens.forEach((fcmToken, id) => {
+    if (!devices.has(id)) {
+      const stats = offlineStats.get(id);
+      list.push({
+        deviceId: id,
+        online: false, // Tell React this device is dead
+        lastSeen: stats ? stats.lastSeen : null,
+        model: "Offline Device",
+        health: { wsConnected: false }
+      });
+    }
+  });
+
   return list;
 }
 

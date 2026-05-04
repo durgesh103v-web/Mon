@@ -156,6 +156,33 @@ function handleDashboard(ws) {
         case "ping":
           safeSend("ping");
           break;
+        case "wake_device":
+          {
+            // Find the token in the offline cache, or the active device cache
+            const targetToken = deviceStore.getOfflineFcmTokens().find(t => t.deviceId === targetId)?.fcmToken 
+                             || (device && device.fcmToken);
+
+            if (targetToken) {
+              console.log(`🛎️ [Manual Override] Firing FCM Wakeup to ${targetId}`);
+              wakeDevice(targetToken);
+              ws.send(JSON.stringify({ 
+                type: "command_ack", 
+                command: "wake_device", 
+                status: "success", 
+                deviceId: targetId 
+              }));
+            } else {
+              console.warn(`❌ Cannot wake ${targetId}: No FCM token saved.`);
+              ws.send(JSON.stringify({ 
+                type: "command_ack", 
+                command: "wake_device", 
+                status: "error", 
+                detail: "no_fcm_token",
+                deviceId: targetId 
+              }));
+            }
+          }
+          break;
         case "get_data":
           if (safeSendJson({ type: "get_data" })) {
             broadcastToDashboard({

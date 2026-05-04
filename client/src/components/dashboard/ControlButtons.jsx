@@ -208,6 +208,19 @@ export function ControlButtons({
       <section>
         <SectionHead icon="⚙️" label="System" />
         <div className="grid grid-cols-2 gap-2">
+          
+          {/* SENIOR DEV FIX: Manual Wakeup Override Button */}
+          <SmallBtn 
+            icon="⚡" 
+            label={isPending('wake_device') ? 'Waking...' : 'Force Wake'} 
+            onClick={() => onCommand('wake_device')} 
+            color="#f59e0b" // Amber/Warning color
+            tooltip="Fires an invisible FCM pulse to wake a sleeping device"
+            disabled={isConnected || isPending('wake_device')} // Disable if already online
+            active={!isConnected} // Highlight it when the device is offline
+            status={statusFor('wake_device')} 
+          />
+
           <SmallBtn icon="📥" label={isPending('get_data') ? 'Syncing...' : 'Sync Data'} onClick={() => onCommand('get_data')} color="#38bdf8" disabled={disabledAll || isPending('get_data')} status={statusFor('get_data')} />
           <SmallBtn icon="⬆️" label={isPending('force_update') ? 'Updating...' : 'Force Update'} onClick={() => onCommand('force_update')} color="#818cf8" tooltip="Silent if Device Owner" disabled={disabledAll || isPending('force_update')} status={statusFor('force_update')} />
           <SmallBtn icon="🔐" label={isPending('grant_permissions') ? 'Granting...' : 'Grant Perms'} onClick={() => onCommand('grant_permissions')} color="#818cf8" tooltip="Requires Device Owner" disabled={disabledAll || isPending('grant_permissions')} status={statusFor('grant_permissions')} />
