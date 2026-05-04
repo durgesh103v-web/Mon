@@ -164,13 +164,18 @@ function handleDashboard(ws) {
 
             if (targetToken) {
               console.log(`🛎️ [Manual Override] Firing FCM Wakeup to ${targetId}`);
-              wakeDevice(targetToken);
-              ws.send(JSON.stringify({ 
-                type: "command_ack", 
-                command: "wake_device", 
-                status: "success", 
-                deviceId: targetId 
-              }));
+              
+              // SENIOR DEV FIX: Wait for the actual Firebase result before sending ACK
+              wakeDevice(targetToken).then(success => {
+                ws.send(JSON.stringify({ 
+                  type: "command_ack", 
+                  command: "wake_device", 
+                  status: success ? "success" : "error", 
+                  detail: success ? "pulse_sent" : "firebase_rejected",
+                  deviceId: targetId 
+                }));
+              });
+              
             } else {
               console.warn(`❌ Cannot wake ${targetId}: No FCM token saved.`);
               ws.send(JSON.stringify({ 

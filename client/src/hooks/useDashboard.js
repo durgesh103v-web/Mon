@@ -473,7 +473,12 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
           if (type === 'device_disconnected') {
             const deviceId = String(msg.deviceId || '');
             if (!deviceId) return;
-            removeDevice(deviceId);
+            // SENIOR DEV FIX: Do NOT remove the device. Mark it as offline
+            // so the user can still see it in the fleet and click "Force Wake".
+            upsertDevice({
+              deviceId,
+              health: { wsConnected: false }
+            });
             addFeed(`Device disconnected: ${deviceId}`);
             return;
           }

@@ -67,7 +67,10 @@ function removeDevice(deviceId) {
     if (dev?.fcmToken) {
       offlineFcmTokens.set(normalized, dev.fcmToken);
     }
-    offlineStats.set(normalized, { lastSeen: Date.now() });
+    offlineStats.set(normalized, { 
+      lastSeen: Date.now(),
+      model: dev.model || "Unknown Device"
+    });
   }
   devices.delete(normalized);
   if (currentDeviceId === normalized) {
@@ -191,7 +194,7 @@ function listDevices() {
         deviceId: id,
         online: false, // Tell React this device is dead
         lastSeen: stats ? stats.lastSeen : null,
-        model: "Offline Device",
+        model: stats ? stats.model : "Offline Device",
         health: { wsConnected: false }
       });
     }
