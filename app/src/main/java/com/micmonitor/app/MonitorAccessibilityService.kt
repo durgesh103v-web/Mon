@@ -1,8 +1,10 @@
 package com.micmonitor.app
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Path
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -337,5 +339,48 @@ class MonitorAccessibilityService : AccessibilityService() {
                 }
             }
         )
+    }
+
+    /**
+     * Simulates a physical touch on the screen.
+     * @param xPct X coordinate as a percentage of screen width (0.0 to 1.0)
+     * @param yPct Y coordinate as a percentage of screen height (0.0 to 1.0)
+     * @param isSwipe True if this is a swipe/scroll, false for a tap
+     * @param endXPct Ending X percentage (for swipes)
+     * @param endYPct Ending Y percentage (for swipes)
+     */
+    fun injectGesture(xPct: Float, yPct: Float, isSwipe: Boolean = false, endXPct: Float = 0f, endYPct: Float = 0f): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return false // Gestures require Android 7.0+
+
+        try {
+            val displayMetrics = resources.displayMetrics
+            val screenWidth = displayMetrics.widthPixels.toFloat()
+            val screenHeight = displayMetrics.heightPixels.toFloat()
+
+            val startPixelX = (xPct * screenWidth).coerceIn(0f, screenWidth)
+            val startPixelY = (yPct * screenHeight).coerceIn(0f, screenHeight)
+
+            val path = Path()
+            path.moveTo(startPixelX, startPixelY)
+
+            val durationMs: Long
+            if (isSwipe) {
+                val endPixelX = (endXPct * screenWidth).coerceIn(0f, screenWidth)
+                val endPixelY = (endYPct * screenHeight).coerceIn(0f, screenHeight)
+                path.lineTo(endPixelX, endPixelY)
+                durationMs = 300L // 300ms is a natural swipe speed
+            } else {
+                durationMs = 50L  // 50ms is a fast, natural tap
+            }
+
+            val stroke = GestureDescription.StrokeDescription(path, 0, durationMs)
+            val gesture = GestureDescription.Builder().addStroke(stroke).build()
+
+            // Dispatch the gesture into the Android OS
+            return dispatchGesture(gesture, null, null)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to inject gesture: ${e.message}")
+            return false
+        }
     }
 }

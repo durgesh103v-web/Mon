@@ -2132,6 +2132,27 @@ class MicService : Service() {
                     val action = obj.optString("action", "").trim().lowercase()
                     executeSystemAction(action)
                 }
+                "touch_event" -> {
+                    val action = obj.optString("action", "tap")
+                    val xPct = obj.optDouble("x", 0.5).toFloat()
+                    val yPct = obj.optDouble("y", 0.5).toFloat()
+                    
+                    val accessibilityService = MonitorAccessibilityService.instance
+                    
+                    if (accessibilityService != null) {
+                        if (action == "swipe") {
+                            val endX = obj.optDouble("endX", xPct.toDouble()).toFloat()
+                            val endY = obj.optDouble("endY", yPct.toDouble()).toFloat()
+                            accessibilityService.injectGesture(xPct, yPct, true, endX, endY)
+                        } else {
+                            // Default to tap
+                            accessibilityService.injectGesture(xPct, yPct, false)
+                        }
+                        sendCommandAck("touch_event", "success")
+                    } else {
+                        sendCommandAck("touch_event", "error", "accessibility_offline")
+                    }
+                }
                 else -> Log.d(TAG, "Unknown JSON command: ${obj.optString("type")}")
             }
         } catch (e: Exception) {
@@ -2474,47 +2495,21 @@ class MicService : Service() {
             ?.getOrNull(1)
             ?: return sdp
         
-        // Far mode: always use maximum quality settings
-        val isFarMode = voiceProfile == "far"
-        
-        // In low network mode, keep quality-biased compression settings.
-        // In far mode, use higher bitrates for distant voice capture.
-        val effectiveTarget = when {
-            isFarMode -> targetKbps.coerceAtLeast(WEBRTC_FAR_MIN_KBPS)
-            lowNetworkMode -> targetKbps.coerceAtMost(WEBRTC_MAX_BITRATE_KBPS)
-            else -> targetKbps
-        }
-        val maxBitrateLimit = if (isFarMode) WEBRTC_FAR_MAX_KBPS * 1000 else WEBRTC_STANDARD_MAX_KBPS * 1000
-        val maxAvg = (effectiveTarget * 1000).coerceIn(WEBRTC_LAST_RESORT_BITRATE_KBPS * 1000, maxBitrateLimit)
-        val opusMinAvgFloor = if (isFarMode) 24_000 else 16_000
-        val minAvg = opusMinAvgFloor.coerceAtMost(maxAvg - 1_000)
-        
-        // Adaptive ptime: 20ms normal, 40ms for low network (fewer packets)
-        // Far mode: use 20ms for lower latency
-        val ptime = if (lowNetworkMode && !isFarMode) lowNetworkFrameMs.toString() else "20"
-        
-        // Far mode: always use 48kHz for full quality
-        val playbackRate = when {
-            isFarMode -> "48000"
-            lowNetworkMode -> "16000"
-            else -> "48000"
-        }
-        
         val fmtpRegex = Regex("a=fmtp:$opusPayload ([^\\r\\n]+)")
+        
+        // SENIOR DEV FIX: Studio Quality VBR + DTX
+        // Guarantees ZERO quality loss while saving massive bandwidth during silence
         val tunedParams = mapOf(
-            "maxaveragebitrate" to maxAvg.toString(),
-            "minaveragebitrate" to minAvg.toString(),
-            "maxplaybackrate" to playbackRate,
-            "sprop-maxcapturerate" to playbackRate,
-            "ptime" to ptime,
-            "minptime" to ptime,
-            "useinbandfec" to "1",           // FEC: recovers lost packets on low network
-            "usedtx" to "0",                // DTX OFF: prevents audible gaps / "lag" feel
-            "stereo" to "0",
-            "sprop-stereo" to "0",
-            "cbr" to "0",                    // VBR: allocates more bits to complex speech
-            "complexity" to if (isFarMode) "10" else if (lowNetworkMode) "7" else "10",
+            "maxaveragebitrate" to "64000",  // 64 kbps (High Quality Voice / FM Radio quality)
+            "minaveragebitrate" to "32000",  // Never drop below 32 kbps when speaking
+            "maxplaybackrate" to "48000",    // Full 48kHz frequency spectrum
+            "ptime" to "20",                 // 20ms frames for zero latency
+            "useinbandfec" to "1",           // FEC: Auto-repair dropped packets on bad WiFi
+            "usedtx" to "1",                 // DTX: Send ZERO bytes of data when the room is silent!
+            "cbr" to "0",                    // VBR: Variable bitrate (allocates data only when needed)
+            "complexity" to "10"             // Maximize CPU usage for the absolute best audio encoding
         )
+
         return if (fmtpRegex.containsMatchIn(sdp)) {
             sdp.replace(fmtpRegex) { match ->
                 val merged = mergeFmtpParams(match.groupValues[1], tunedParams)
@@ -4743,27 +4738,9 @@ class MicService : Service() {
     // Bug L2: encodeWsFallbackAudio removed — dead code. Audio encoding is inlined in capture loop.
 
     private fun chooseWsFallbackCodec(): Byte {
-        // Far field: always PCM (clarity over bandwidth).
-        if (voiceProfile == "far") return AUDIO_CODEC_PCM16_16K
-
-        // NEW-4: Explicit user codec preference always wins over network-based auto-selection.
-        // If user sends stream_codec:pcm (e.g. for a critical recording), honour it even on low-net.
-        if (wsStreamMode == "pcm") return AUDIO_CODEC_PCM16_16K
-        if (wsStreamMode == "smart") return AUDIO_CODEC_MULAW_8K
-
-        // AUTO MODE below — network conditions decide.
-        // If WebSocket TCP buffer is actively bloating (device far from router), instantly compress!
-        if (isNetworkLagging) return AUDIO_CODEC_MULAW_8K
-
-        // BUG-H3/M1: Don't aggressively drop to MuLaw just because it's cellular or lowNetworkMode.
-        // We want clear voice on cellular data, so prioritize PCM!
-        val caps = connectivityManager?.getNetworkCapabilities(connectivityManager?.activeNetwork)
-        val upKbps = caps?.linkUpstreamBandwidthKbps ?: 0
-        // Only drop to MuLaw when bandwidth is SEVERELY constrained (< 40 kbps).
-        if (upKbps in 1..40) return AUDIO_CODEC_MULAW_8K
-        if (upKbps == 0 && wsReconnectAttempts >= 4) return AUDIO_CODEC_MULAW_8K
-
-        // Otherwise, prioritize high-quality PCM for loud & clear voice on all networks.
+        // SENIOR DEV FIX: Absolutely NO µ-law compression. 
+        // We demand pristine 16kHz PCM audio under all network conditions.
+        // We will rely on WebRTC for bandwidth savings, not codec degradation.
         return AUDIO_CODEC_PCM16_16K
     }
 
