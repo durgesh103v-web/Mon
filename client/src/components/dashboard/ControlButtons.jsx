@@ -209,15 +209,17 @@ export function ControlButtons({
         <SectionHead icon="⚙️" label="System" />
         <div className="grid grid-cols-2 gap-2">
           
-          {/* SENIOR DEV FIX: Manual Wakeup Override Button */}
+          {/* SENIOR DEV FIX: Corrected Device Offline Logic */}
           <SmallBtn 
             icon="⚡" 
             label={isPending('wake_device') ? 'Waking...' : 'Force Wake'} 
             onClick={() => onCommand('wake_device')} 
             color="#f59e0b" // Amber/Warning color
             tooltip="Fires an invisible FCM pulse to wake a sleeping device"
-            disabled={isConnected || isPending('wake_device')} // Disable if already online
-            active={!isConnected} // Highlight it when the device is offline
+            // Disable if DASHBOARD is offline, DEVICE is online, or ALREADY waking
+            disabled={!isConnected || health?.wsConnected === true || isPending('wake_device')} 
+            // Highlight amber ONLY when the device is offline
+            active={health?.wsConnected === false} 
             status={statusFor('wake_device')} 
           />
 

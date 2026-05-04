@@ -246,7 +246,7 @@ function App() {
         <main className="p-4 md:p-5 max-w-screen-2xl mx-auto space-y-5">
 
         {/* Device Fleet View (Vertical List) */}
-        {devices.length > 0 && <DeviceFleetList devices={devices} selectedDeviceId={selectedDeviceId} setSelectedDeviceId={setSelectedDeviceId} />}
+        {devices.length > 0 && <DeviceFleetList devices={devices} selectedDeviceId={selectedDeviceId} setSelectedDeviceId={setSelectedDeviceId} onCommand={handleCommand} pendingCommands={pendingCommands} />}
 
         {/* No device placeholder */}
         {devices.length === 0 && <GlassCard className="py-16 text-center">
