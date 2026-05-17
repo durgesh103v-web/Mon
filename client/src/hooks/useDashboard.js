@@ -22,7 +22,7 @@ const mergePhotoList = (incoming, existing = []) => {
     .slice(0, PHOTO_LIMIT);
 };
 
-export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
+export function useDashboard(onAudioData) {
   const SELECTED_DEVICE_STORAGE_KEY = 'micmonitor:selectedDeviceId';
   const [wsState, setWsState] = useState('connecting');
   const [isColdStarting, setIsColdStarting] = useState(false);
@@ -55,14 +55,11 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
   const [pendingCommands, setPendingCommands] = useState({});
   const [toasts, setToasts] = useState([]);
   const [wsReconnectAt, setWsReconnectAt] = useState(null);
-  const [fileManagerData, setFileManagerData] = useState(null);
-
   const wsRef = useRef(null);
   const connectRef = useRef(null);
   const reconnectTimerRef = useRef(null);
   const coldStartTimerRef = useRef(null);
   const pendingWsCommandsRef = useRef([]);
-  const lastCameraUrlsRef = useRef({});
   const lastWsMessageAtRef = useRef(0);
   const pendingTimersRef = useRef({});
   const toastTimersRef = useRef({});
@@ -295,13 +292,9 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
     }
   }, [addFeed, pushToast, setCommandStatus]);
   const onAudioDataRef = useRef(onAudioData);
-  const onWebRTCMessageRef = useRef(onWebRTCMessage);
-  const onCameraFrameRef = useRef(onCameraFrame);
   useEffect(() => {
     onAudioDataRef.current = onAudioData;
-    onWebRTCMessageRef.current = onWebRTCMessage;
-    onCameraFrameRef.current = onCameraFrame;
-  }, [onAudioData, onWebRTCMessage, onCameraFrame]);
+  }, [onAudioData]);
   useEffect(() => {
     let stopped = false;
     const connect = () => {
@@ -351,43 +344,6 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
         // Handle binary data
         if (event.data instanceof ArrayBuffer) {
           const view = new DataView(event.data);
-          if (view.byteLength >= 4 && view.getUint8(0) === 0x43 && view.getUint8(1) === 0x4C) {
-            // 'CL'
-            const headerLen = view.getUint16(2, false);
-            if (view.byteLength >= 4 + headerLen) {
-              const headerBytes = new Uint8Array(event.data, 4, headerLen);
-              const headerJson = new TextDecoder().decode(headerBytes);
-              try {
-                const header = JSON.parse(headerJson);
-                const jpegBytes = new Uint8Array(event.data, 4 + headerLen);
-                const blob = new Blob([jpegBytes], {
-                  type: String(header.mime || 'image/jpeg')
-                });
-                const url = URL.createObjectURL(blob);
-              const devId = String(header.deviceId || '');
-              
-              if (lastCameraUrlsRef.current[devId]) {
-                URL.revokeObjectURL(lastCameraUrlsRef.current[devId]);
-              }
-              lastCameraUrlsRef.current[devId] = url;
-              
-                if (onCameraFrameRef.current) {
-                  onCameraFrameRef.current({
-                    deviceId: devId,
-                    camera: header.camera === 'front' ? 'front' : 'rear',
-                    quality: String(header.quality || 'normal'),
-                    mime: String(header.mime || 'image/jpeg'),
-                    data: '',
-                    url: url,
-                    timestamp: Number(header.ts || Date.now())
-                  });
-                }
-              } catch (e) {
-                console.error('Failed to parse binary camera frame:', e);
-              }
-            }
-            return;
-          }
           if (onAudioDataRef.current && event.data.byteLength > 4) {
             // Extract device ID from frame header
             const deviceIdLen = view.getUint16(0, false);
@@ -456,6 +412,22 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
               deviceId,
               health: msg.health || {}
             });
+            return;
+          }
+          if (type === 'audio_quality') {
+            const deviceId = String(msg.deviceId || selectedDeviceIdRef.current || '');
+            if (!deviceId) return;
+            upsertDevice({
+              deviceId,
+              health: {
+                lowNetwork: msg.lowNetwork === true,
+                networkLagging: true,
+                droppingPackets: msg.dropping === true,
+                bufferedBytes: Number(msg.buffered || 0),
+                audioDrops: Number(msg.droppedFrames || msg.dropped || 0)
+              }
+            });
+            addFeed(`Audio lag on ${deviceId.slice(0, 8)}: dropping old packets`);
             return;
           }
           if (type === 'gain_ack') {
@@ -549,29 +521,6 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
             return;
           }
 
-          // Handle file manager results
-          if (type === 'file_manager_result') {
-            setFileManagerData(msg);
-            return;
-          }
-
-          // Handle live camera frame
-          if (type === 'camera_live_frame') {
-            if (onCameraFrameRef.current) {
-              const frame = {
-                deviceId: String(msg.deviceId || ''),
-                camera: msg.camera === 'front' ? 'front' : 'rear',
-                quality: String(msg.quality || 'normal'),
-                mime: String(msg.mime || 'image/jpeg'),
-                data: String(msg.data || ''),
-                timestamp: Number(msg.ts || Date.now())
-              };
-              onCameraFrameRef.current(frame);
-            }
-            return;
-          }
-
-
           if (type === 'screenshot_request_sent') {
             addFeed(`📸 Screenshot requested from device ${msg.deviceId}`);
             return;
@@ -654,9 +603,6 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
                 });
               }
             }
-            if (cmd.startsWith('webrtc_') && onWebRTCMessageRef.current) {
-              onWebRTCMessageRef.current(msg);
-            }
             return;
           }
           if (type === 'ack') {
@@ -666,14 +612,6 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
             return;
           }
 
-          // Handle WebRTC signaling messages
-          if (type === 'webrtc_answer' || type === 'webrtc_ice' || type === 'webrtc_state') {
-            if (onWebRTCMessageRef.current) {
-              onWebRTCMessageRef.current(msg);
-            }
-            // Removed addFeed for WebRTC signaling to reduce spam
-            return;
-          }
           if (type && type !== 'device_health' && type !== 'audio_quality' && type !== 'stream_started' && type !== 'stream_stopped') {
             // Optional: addFeed(`Ignored Event: ${type}`)
           }
@@ -789,7 +727,6 @@ export function useDashboard(onAudioData, onWebRTCMessage, onCameraFrame) {
     setSelectedDeviceId,
     sendCommand,
     reconnectNow,
-    fileManagerData,
     // Expose the underlying control WebSocket instance (may be null until connected)
     ws: wsRef.current
   };

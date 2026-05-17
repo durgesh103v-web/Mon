@@ -10,7 +10,7 @@ const deviceStore = require("../models/deviceStore");
 const { sendHybridCommand } = require("../services/commandService");
 const { broadcastToDashboard } = require("../services/dashboardService");
 const { normalizeDeviceId } = require("../utils/device");
-const { ICE_SERVERS, PHOTOS_DIR, UPDATES_DIR } = require("../config");
+const { PHOTOS_DIR, UPDATES_DIR } = require("../config");
 
 const RECORDINGS_DIR = path.join(path.dirname(PHOTOS_DIR), "recordings");
 if (!fs.existsSync(RECORDINGS_DIR)) {
@@ -27,11 +27,6 @@ const SUPPORTED_COMMAND_TYPES = new Set([
 
   "ping",
   "get_data",
-  "webrtc_start",
-  "webrtc_stop",
-  "webrtc_offer",
-  "webrtc_ice",
-  "webrtc_quality",
   "ai_mode",
   "ai_auto",
   "stream_codec",
@@ -43,8 +38,6 @@ const SUPPORTED_COMMAND_TYPES = new Set([
   "photo_ai",
   "photo_quality",
   "photo_night",
-  "camera_live_start",
-  "camera_live_stop",
   "force_update",
   "force_reconnect",
   "grant_permissions",
@@ -102,13 +95,6 @@ function heartbeat(req, res) {
   const commandsAvailable = deviceStore.queuedCommandCount(deviceId) > 0;
 
   res.json({ status: "ok", commandsAvailable });
-}
-
-function webrtcConfig(req, res) {
-  res.json({
-    iceServers: ICE_SERVERS,
-    tokenRequired: false,
-  });
 }
 
 async function listRecordings(req, res) {
@@ -584,12 +570,6 @@ async function sendCommand(req, res) {
       error: `Unsupported command.type: ${commandType}`,
     });
   }
-  if (commandType === "webrtc_offer") {
-    const sdp = typeof command.sdp === "string" ? command.sdp : "";
-    if (!sdp) return res.status(400).json({ error: "Missing webrtc_offer.sdp" });
-    if (sdp.length > 300000) return res.status(413).json({ error: "webrtc_offer.sdp too large" });
-  }
-
   const result = await sendHybridCommand(deviceId, { ...command, type: commandType });
   broadcastToDashboard({
     type: "command_dispatch",
@@ -740,7 +720,6 @@ async function deleteRecording(req, res) {
 module.exports = {
   health,
   listDevices,
-  webrtcConfig,
   listRecordings,
   listPhotos,
   versionInfo,

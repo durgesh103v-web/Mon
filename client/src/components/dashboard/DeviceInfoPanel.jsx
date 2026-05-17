@@ -1,102 +1,73 @@
-import { useEffect, useRef } from 'react';
-// ── Mini status metric card ────────────────────────────────────────────────────
-function MetricCard({
-  label,
-  value,
-  color = 'default',
-  glow = false
-}) {
+import { useEffect, useRef, memo } from 'react';
+
+// ── Mini metric card ───────────────────────────────────────────────────────
+function MetricCard({ label, value, color = 'default', glow = false }) {
   const colors = {
-    green: {
-      text: '#10b981',
-      bg: 'rgba(16,185,129,0.08)',
-      border: 'rgba(16,185,129,0.2)',
-      glow: 'rgba(16,185,129,0.15)'
-    },
-    yellow: {
-      text: '#f59e0b',
-      bg: 'rgba(245,158,11,0.08)',
-      border: 'rgba(245,158,11,0.2)',
-      glow: 'rgba(245,158,11,0.15)'
-    },
-    red: {
-      text: '#ef4444',
-      bg: 'rgba(239,68,68,0.08)',
-      border: 'rgba(239,68,68,0.2)',
-      glow: 'rgba(239,68,68,0.15)'
-    },
-    blue: {
-      text: '#60a5fa',
-      bg: 'rgba(96,165,250,0.08)',
-      border: 'rgba(96,165,250,0.2)',
-      glow: 'rgba(96,165,250,0.15)'
-    },
-    violet: {
-      text: '#a78bfa',
-      bg: 'rgba(167,139,250,0.08)',
-      border: 'rgba(167,139,250,0.2)',
-      glow: 'rgba(167,139,250,0.15)'
-    },
-    default: {
-      text: '#94a3b8',
-      bg: 'rgba(148,163,184,0.05)',
-      border: 'rgba(148,163,184,0.1)',
-      glow: 'transparent'
-    }
+    green: { text: '#10b981', bg: 'rgba(16,185,129,0.06)', border: 'rgba(16,185,129,0.18)', glow: 'rgba(16,185,129,0.12)' },
+    yellow: { text: '#f59e0b', bg: 'rgba(245,158,11,0.06)', border: 'rgba(245,158,11,0.18)', glow: 'rgba(245,158,11,0.12)' },
+    red: { text: '#ef4444', bg: 'rgba(239,68,68,0.06)', border: 'rgba(239,68,68,0.18)', glow: 'rgba(239,68,68,0.12)' },
+    blue: { text: '#60a5fa', bg: 'rgba(96,165,250,0.06)', border: 'rgba(96,165,250,0.18)', glow: 'rgba(96,165,250,0.12)' },
+    violet: { text: '#a78bfa', bg: 'rgba(167,139,250,0.06)', border: 'rgba(167,139,250,0.18)', glow: 'rgba(167,139,250,0.12)' },
+    default: { text: '#71717a', bg: 'rgba(113,113,122,0.04)', border: 'rgba(113,113,122,0.1)', glow: 'transparent' },
   };
   const c = colors[color];
-  return <div className="flex flex-col gap-1 p-3 rounded-xl" style={{
-    background: c.bg,
-    border: `1px solid ${c.border}`,
-    boxShadow: glow ? `0 0 18px ${c.glow}` : 'none'
-  }}>
-      <span className="text-[9px] uppercase tracking-widest font-semibold" style={{
-      color: '#64748b'
-    }}>{label}</span>
-      <span className="text-sm font-bold leading-none" style={{
-      color: c.text
-    }}>{value ?? '—'}</span>
-    </div>;
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 4, padding: '10px 12px', borderRadius: 12,
+      background: c.bg, border: `1px solid ${c.border}`,
+      boxShadow: glow ? `0 0 14px ${c.glow}` : 'none',
+    }}>
+      <span style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, color: '#52525b' }}>
+        {label}
+      </span>
+      <span style={{ fontSize: 12, fontWeight: 700, lineHeight: 1, color: c.text }}>
+        {value ?? '—'}
+      </span>
+    </div>
+  );
 }
 
-// ── Animated waveform visualizer ───────────────────────────────────────────────
-function Waveform({
-  data,
-  isPlaying
-}) {
+// ── Waveform visualizer ────────────────────────────────────────────────────
+function Waveform({ data, isPlaying }) {
   const canvasRef = useRef(null);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
     canvas.width = rect.width * dpr;
     canvas.height = rect.height * dpr;
     ctx.scale(dpr, dpr);
+
     const width = rect.width;
     const height = rect.height;
     const centerY = height / 2;
     ctx.clearRect(0, 0, width, height);
+
     const numBars = 48;
     const barWidth = width / numBars;
+
     if (!data || data.length === 0) {
-      // Animated idle bars
       for (let i = 0; i < numBars; i++) {
         const idle = isPlaying ? 2 + Math.random() * 6 : 2;
-        ctx.fillStyle = 'rgba(99,102,241,0.15)';
+        ctx.fillStyle = 'rgba(99,102,241,0.12)';
         ctx.beginPath();
         ctx.roundRect(i * barWidth + 1, centerY - idle / 2, barWidth - 2, idle, 2);
         ctx.fill();
       }
       return;
     }
+
     let maxAmp = 0.05;
     for (let i = 0; i < data.length; i++) {
       const v = Math.abs(data[i]);
       if (v > maxAmp) maxAmp = v;
     }
+
     const chunkSize = Math.floor(data.length / numBars);
     for (let i = 0; i < numBars; i++) {
       let sumSq = 0;
@@ -113,103 +84,111 @@ function Waveform({
       let barHeight = normalized * height * 0.85 * eqMultiplier * jitter;
       barHeight = Math.max(3, Math.min(barHeight, height * 0.92));
 
-      // Gradient per bar based on intensity
       const intensity = normalized;
-      const hue = 145 + intensity * 100; // green → blue → violet
+      const hue = 145 + intensity * 100;
       const sat = 65 + intensity * 20;
       const lit = 45 + intensity * 15;
-      ctx.fillStyle = `hsla(${hue}, ${sat}%, ${lit}%, ${0.7 + intensity * 0.3})`;
+      ctx.fillStyle = `hsla(${hue}, ${sat}%, ${lit}%, ${0.65 + intensity * 0.35})`;
       ctx.beginPath();
-      ctx.roundRect(i * barWidth + Math.max(1, barWidth * 0.12), centerY - barHeight / 2, Math.max(1, barWidth * 0.76), barHeight, 3);
+      ctx.roundRect(
+        i * barWidth + Math.max(1, barWidth * 0.12),
+        centerY - barHeight / 2,
+        Math.max(1, barWidth * 0.76),
+        barHeight, 3
+      );
       ctx.fill();
     }
   }, [data, isPlaying]);
-  return <div className="relative h-20 rounded-xl overflow-hidden" style={{
-    background: 'rgba(6,8,18,0.6)',
-    border: '1px solid rgba(99,102,241,0.15)',
-    boxShadow: 'inset 0 0 30px rgba(0,0,0,0.4)'
-  }}>
-      <canvas ref={canvasRef} className="w-full h-full" style={{
-      display: 'block'
-    }} />
-      {isPlaying && <div className="absolute inset-0 pointer-events-none" style={{
-      background: 'linear-gradient(90deg, rgba(6,8,18,0.6) 0%, transparent 10%, transparent 90%, rgba(6,8,18,0.6) 100%)'
-    }} />}
-    </div>;
+
+  return (
+    <div style={{
+      position: 'relative', height: 64, borderRadius: 12, overflow: 'hidden',
+      background: 'rgba(6,8,18,0.5)',
+      border: '1px solid rgba(99,102,241,0.1)',
+      boxShadow: 'inset 0 0 20px rgba(0,0,0,0.3)',
+    }}>
+      <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
+      {isPlaying && (
+        <div style={{
+          position: 'absolute', inset: 0, pointerEvents: 'none',
+          background: 'linear-gradient(90deg, rgba(6,8,18,0.5) 0%, transparent 10%, transparent 90%, rgba(6,8,18,0.5) 100%)',
+        }} />
+      )}
+    </div>
+  );
 }
 
-// ── Main panel ─────────────────────────────────────────────────────────────────
-export function DeviceInfoPanel({
-  device,
-  audioState,
-  webRTCState
-}) {
+// ── Main panel ─────────────────────────────────────────────────────────────
+export const DeviceInfoPanel = memo(function DeviceInfoPanel({ device, audioState }) {
   if (!device) {
-    return <div className="rounded-2xl p-8 text-center" style={{
-      background: 'rgba(15,20,40,0.6)',
-      border: '1px solid rgba(255,255,255,0.07)',
-      backdropFilter: 'blur(12px)'
-    }}>
-        <div className="text-4xl mb-3 opacity-20">📱</div>
-        <div className="text-slate-500 text-sm">No device selected</div>
-      </div>;
+    return (
+      <div className="glass-card" style={{ padding: '40px 20px', textAlign: 'center' }}>
+        <div style={{ fontSize: 36, marginBottom: 8, opacity: 0.2 }}>📱</div>
+        <div style={{ fontSize: 13, color: '#52525b' }}>No device selected</div>
+      </div>
+    );
   }
+
   const health = device.health || {};
   const isStreaming = audioState?.isPlaying || false;
-  const webRtcConnected = webRTCState?.state === 'connected';
   const isLowNetwork = health.lowNetwork === true;
+  const qualityColor = health.connQuality === 'excellent' ? 'green'
+    : health.connQuality === 'good' ? 'blue'
+    : health.connQuality === 'poor' ? 'red' : 'yellow';
 
-  // Connection quality color
-  const qualityColor = health.connQuality === 'excellent' ? 'green' : health.connQuality === 'good' ? 'blue' : health.connQuality === 'poor' ? 'red' : 'yellow';
-  return <div className="rounded-2xl overflow-hidden" style={{
-    background: 'rgba(12,16,32,0.7)',
-    border: '1px solid rgba(99,102,241,0.15)',
-    backdropFilter: 'blur(16px)',
-    boxShadow: '0 8px 40px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)'
-  }}>
-      
-      {/* ── Device header ─────────────────────────────────────────────── */}
-      <div className="px-5 py-4" style={{
-      background: 'linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(139,92,246,0.08) 100%)',
-      borderBottom: '1px solid rgba(99,102,241,0.15)'
-    }}>
-        <div className="flex items-start justify-between gap-4">
-          {/* Device identity */}
-          <div className="flex items-center gap-3 min-w-0">
-            {/* Online indicator */}
-            <div className="relative shrink-0">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl" style={{
-              background: health.wsConnected ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.12)',
-              border: `1px solid ${health.wsConnected ? 'rgba(16,185,129,0.3)' : 'rgba(245,158,11,0.25)'}`
-            }}>
-                📱
-              </div>
-              <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[#0c1020] ${health.wsConnected ? 'bg-emerald-400' : 'bg-yellow-400 animate-pulse'}`} />
+  return (
+    <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
+
+      {/* Device header */}
+      <div style={{
+        padding: '14px 18px',
+        background: 'linear-gradient(135deg, rgba(99,102,241,0.08), rgba(139,92,246,0.05))',
+        borderBottom: '1px solid rgba(99,102,241,0.1)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+            <div style={{ position: 'relative', flexShrink: 0 }}>
+              <div style={{
+                width: 38, height: 38, borderRadius: 10,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
+                background: health.wsConnected ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.08)',
+                border: `1px solid ${health.wsConnected ? 'rgba(16,185,129,0.25)' : 'rgba(245,158,11,0.2)'}`,
+              }}>📱</div>
+              <span style={{
+                position: 'absolute', bottom: -2, right: -2,
+                width: 10, height: 10, borderRadius: '50%',
+                border: '2px solid #0c1020',
+                background: health.wsConnected ? '#10b981' : '#f59e0b',
+                animation: health.wsConnected ? 'none' : 'beatBar 0.8s ease-in-out infinite alternate',
+              }} />
             </div>
-            <div className="min-w-0">
-              <div className="font-mono text-sm font-bold text-white truncate">
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, fontFamily: "'IBM Plex Mono', monospace", color: '#e4e4e7', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {device.deviceId}
               </div>
-              <div className="text-xs text-slate-400 mt-0.5 truncate">
-                {device.model || 'Unknown device'} &nbsp;·&nbsp; SDK {device.sdk || '?'} &nbsp;·&nbsp; v{device.appVersionName || '?'} <span className="text-slate-600">({device.appVersionCode || '?'})</span>
+              <div style={{ fontSize: 10, color: '#71717a', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {device.model || 'Unknown'} · SDK {device.sdk || '?'} · v{device.appVersionName || '?'}
+                <span style={{ color: '#3f3f46' }}> ({device.appVersionCode || '?'})</span>
               </div>
             </div>
           </div>
 
-          {/* Status badges */}
-          <div className="flex flex-wrap gap-2 shrink-0">
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', flexShrink: 0 }}>
             {isStreaming && <Badge color="green" dot pulse>LIVE</Badge>}
-            {webRtcConnected && <Badge color="blue">WEBRTC</Badge>}
             {isLowNetwork && <Badge color="yellow" dot>LOW-BW</Badge>}
             {health.callActive && <Badge color="red" dot pulse>ON CALL</Badge>}
-            {!isStreaming && !webRtcConnected && !health.callActive && <Badge color="gray">IDLE</Badge>}
+            {!isStreaming && !health.callActive && <Badge color="gray">IDLE</Badge>}
           </div>
         </div>
       </div>
 
-      {/* ── Metrics grid ──────────────────────────────────────────────── */}
-      <div className="p-4">
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 mb-4">
+      {/* Metrics grid */}
+      <div style={{ padding: 14 }}>
+        <div style={{
+          display: 'grid', gap: 6,
+          gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+          marginBottom: 14,
+        }}>
           <MetricCard label="WebSocket" value={health.wsConnected ? 'Connected' : 'Disconnected'} color={health.wsConnected ? 'green' : 'red'} glow={health.wsConnected} />
           <MetricCard label="Mic Capture" value={health.micCapturing ? 'Running' : 'Stopped'} color={health.micCapturing ? 'green' : 'red'} />
           <MetricCard label="Conn Quality" value={health.connQuality || '—'} color={qualityColor} />
@@ -217,74 +196,50 @@ export function DeviceInfoPanel({
           <MetricCard label="Voice Profile" value={health.voiceProfile ? health.voiceProfile.charAt(0).toUpperCase() + health.voiceProfile.slice(1) : '—'} color={health.voiceProfile === 'far' ? 'yellow' : health.voiceProfile === 'near' ? 'blue' : 'default'} />
           <MetricCard label="Stream Codec" value={health.streamCodec ? `${health.streamCodec.toUpperCase()} ${health.streamCodecMode || ''}` : '—'} color="violet" />
           <MetricCard label="Battery" value={health.batteryPct != null ? `${health.batteryPct}%${health.charging ? ' ⚡' : ''}` : '—'} color={health.batteryPct != null && health.batteryPct < 20 ? 'red' : health.batteryPct != null && health.batteryPct > 60 ? 'green' : 'yellow'} />
-          <MetricCard label="Noise Floor" value={health.noiseDb !== undefined && health.noiseDb !== null ? `${health.noiseDb.toFixed(0)} dB` : '—'} color="default" />
           <MetricCard label="Audio Latency" value={audioState?.latencyMs ? `${audioState.latencyMs}ms` : '—'} color={audioState?.latencyMs && audioState.latencyMs > 500 ? 'yellow' : 'default'} />
           <MetricCard label="Buffer Health" value={audioState?.bufferHealth !== undefined ? `${Math.round(audioState.bufferHealth * 100)}%` : '—'} color={audioState?.bufferHealth !== undefined && audioState.bufferHealth < 0.2 ? 'red' : 'default'} />
-          <MetricCard label="WebRTC" value={webRtcConnected ? 'Connected' : webRTCState?.state || 'Idle'} color={webRtcConnected ? 'green' : webRTCState?.state === 'connecting' ? 'yellow' : 'default'} />
           <MetricCard label="MIC Level" value={health.micInLevel !== undefined ? `${health.micInLevel}%` : 'Active'} color="green" glow={isStreaming} />
         </div>
 
-        {/* ── Waveform ──────────────────────────────────────────────────── */}
-        <div className="mb-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] uppercase tracking-widest font-semibold text-indigo-400">Waveform</span>
-            {isStreaming && <div className="flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="text-[10px] text-emerald-400 font-medium">LIVE AUDIO</span>
-              </div>}
+        {/* Waveform */}
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, color: '#818cf8' }}>
+              Waveform
+            </span>
+            {isStreaming && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#10b981', animation: 'beatBar 0.8s ease-in-out infinite alternate' }} />
+                <span style={{ fontSize: 9, color: '#10b981', fontWeight: 600 }}>LIVE AUDIO</span>
+              </div>
+            )}
           </div>
           <Waveform data={audioState?.waveform || null} isPlaying={isStreaming} />
         </div>
       </div>
-    </div>;
-}
+    </div>
+  );
+});
 
-// ── Badge component ────────────────────────────────────────────────────────────
-function Badge({
-  children,
-  color,
-  dot = false,
-  pulse = false
-}) {
+// ── Badge component ────────────────────────────────────────────────────────
+function Badge({ children, color, dot = false, pulse = false }) {
   const colors = {
-    green: {
-      bg: 'rgba(16,185,129,0.15)',
-      border: 'rgba(16,185,129,0.35)',
-      text: '#34d399'
-    },
-    blue: {
-      bg: 'rgba(96,165,250,0.15)',
-      border: 'rgba(96,165,250,0.35)',
-      text: '#60a5fa'
-    },
-    yellow: {
-      bg: 'rgba(245,158,11,0.15)',
-      border: 'rgba(245,158,11,0.35)',
-      text: '#fbbf24'
-    },
-    red: {
-      bg: 'rgba(239,68,68,0.15)',
-      border: 'rgba(239,68,68,0.35)',
-      text: '#f87171'
-    },
-    gray: {
-      bg: 'rgba(100,116,139,0.15)',
-      border: 'rgba(100,116,139,0.35)',
-      text: '#94a3b8'
-    },
-    violet: {
-      bg: 'rgba(167,139,250,0.15)',
-      border: 'rgba(167,139,250,0.35)',
-      text: '#a78bfa'
-    }
+    green: { bg: 'rgba(16,185,129,0.12)', border: 'rgba(16,185,129,0.3)', text: '#34d399' },
+    blue: { bg: 'rgba(96,165,250,0.12)', border: 'rgba(96,165,250,0.3)', text: '#60a5fa' },
+    yellow: { bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.3)', text: '#fbbf24' },
+    red: { bg: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.3)', text: '#f87171' },
+    gray: { bg: 'rgba(82,82,91,0.12)', border: 'rgba(82,82,91,0.3)', text: '#71717a' },
   };
   const c = colors[color];
-  return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold tracking-wider" style={{
-    background: c.bg,
-    border: `1px solid ${c.border}`,
-    color: c.text
-  }}>
-      {dot && <span className={`w-1.5 h-1.5 rounded-full bg-current ${pulse ? 'animate-pulse' : ''}`} />}
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 4,
+      padding: '2px 8px', borderRadius: 8,
+      fontSize: 9, fontWeight: 700, letterSpacing: '0.06em',
+      background: c.bg, border: `1px solid ${c.border}`, color: c.text,
+    }}>
+      {dot && <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'currentColor', animation: pulse ? 'beatBar 0.8s ease-in-out infinite alternate' : 'none' }} />}
       {children}
-    </span>;
+    </span>
+  );
 }

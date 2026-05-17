@@ -82,7 +82,7 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false  // DISABLED: ProGuard breaks WebRTC native libs
+            isMinifyEnabled = false
             isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -137,9 +137,6 @@ dependencies {
 
     // WebSocket for live streaming
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-
-    // WebRTC (Opus over UDP) for low-latency audio streaming
-    implementation("io.github.webrtc-sdk:android:125.6422.07")
 
     // Coroutines for background operations
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")

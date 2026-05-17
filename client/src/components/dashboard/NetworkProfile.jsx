@@ -1,4 +1,6 @@
-export function NetworkProfile({
+import { memo } from 'react';
+
+export const NetworkProfile = memo(function NetworkProfile({
   lowNetwork = false,
   streamCodec,
   streamCodecMode,
@@ -8,135 +10,138 @@ export function NetworkProfile({
   netType,
   isConnected = true,
   deviceId,
-  pendingCommands = {}
+  pendingCommands = {},
 }) {
   const status = deviceId ? pendingCommands[`${deviceId}:set_low_network`]?.status : null;
   const isPending = status === 'sending' || status === 'queued';
   const disableToggle = !isConnected || !deviceId || isPending;
-  const modeLabel = lowNetwork ? '⚡ Low-Bandwidth Mode' : `📡 High-Quality Mode`;
-  const modeDesc = lowNetwork ? 'Server 2.5× gain boost active • Optimized for weak signal' : streamCodecMode === 'auto' ? 'HQ Opus auto-codec • Max fidelity for clear voice' : streamCodec === 'pcm' ? 'Uncompressed PCM 16-bit • Zero loss' : `${streamCodec || 'PCM'} ${streamCodecMode || ''}`;
-  const qualColor = connQuality === 'excellent' ? '#10b981' : connQuality === 'good' ? '#6366f1' : connQuality === 'poor' ? '#ef4444' : '#f59e0b';
-  return <div className="rounded-2xl px-5 py-3 flex items-center justify-between gap-4 flex-wrap" style={{
-    background: lowNetwork ? 'linear-gradient(90deg, rgba(245,158,11,0.1) 0%, rgba(239,68,68,0.08) 100%)' : 'linear-gradient(90deg, rgba(14,165,233,0.1) 0%, rgba(16,185,129,0.08) 100%)',
-    border: `1px solid ${lowNetwork ? 'rgba(245,158,11,0.35)' : 'rgba(34,211,238,0.28)'}`,
-    backdropFilter: 'blur(12px)',
-    boxShadow: lowNetwork ? '0 0 30px rgba(245,158,11,0.14)' : '0 0 30px rgba(14,165,233,0.14)'
-  }}>
-      {/* Left — mode label */}
-      <div className="flex items-center gap-4">
-        {/* Animated signal bars icon */}
-        <div className="flex items-end gap-0.5 h-6" aria-hidden="true">
-          {[3, 5, 7, 9].map((h, i) => <div key={i} className="w-1 rounded-sm transition-all duration-500" style={{
-          height: `${lowNetwork && i > 1 ? Math.max(3, h * 0.4) : h}px`,
-          background: lowNetwork ? i < 2 ? '#f59e0b' : 'rgba(245,158,11,0.2)' : `hsl(${145 + i * 15}, 70%, 55%)`,
-          opacity: isStreaming ? 1 : 0.5
-        }} />)}
+
+  const modeLabel = lowNetwork ? '⚡ Low-Bandwidth Mode' : '📡 High-Quality Mode';
+  const modeDesc = lowNetwork
+    ? 'Longer PCM frames + gain boost for weak signal'
+    : streamCodec === 'pcm'
+      ? 'Realtime PCM 16-bit for clear voice'
+      : `${streamCodec || 'PCM'} ${streamCodecMode || ''}`;
+
+  const qualColor = connQuality === 'excellent' ? '#10b981'
+    : connQuality === 'good' ? '#818cf8'
+    : connQuality === 'poor' ? '#ef4444' : '#f59e0b';
+
+  return (
+    <div style={{
+      borderRadius: 14, padding: '10px 18px',
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      gap: 14, flexWrap: 'wrap',
+      background: lowNetwork
+        ? 'linear-gradient(90deg, rgba(245,158,11,0.06), rgba(239,68,68,0.04))'
+        : 'linear-gradient(90deg, rgba(14,165,233,0.06), rgba(16,185,129,0.04))',
+      border: `1px solid ${lowNetwork ? 'rgba(245,158,11,0.25)' : 'rgba(34,211,238,0.2)'}`,
+      backdropFilter: 'blur(12px)',
+      boxShadow: lowNetwork ? '0 0 20px rgba(245,158,11,0.08)' : '0 0 20px rgba(14,165,233,0.08)',
+    }}>
+      {/* Left — mode info */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        {/* Signal bars */}
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1.5, height: 20 }} aria-hidden="true">
+          {[3, 5, 7, 9].map((h, i) => (
+            <div key={i} style={{
+              width: 3, borderRadius: 1.5, transition: 'all 0.4s',
+              height: `${lowNetwork && i > 1 ? Math.max(3, h * 0.4) : h}px`,
+              background: lowNetwork
+                ? (i < 2 ? '#f59e0b' : 'rgba(245,158,11,0.15)')
+                : `hsl(${145 + i * 15}, 65%, 52%)`,
+              opacity: isStreaming ? 1 : 0.45,
+            }} />
+          ))}
         </div>
 
         <div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-bold" style={{
-            color: lowNetwork ? '#fbbf24' : '#a5b4fc'
-          }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: lowNetwork ? '#fbbf24' : '#a5b4fc' }}>
               {modeLabel}
             </span>
-            {lowNetwork && isStreaming && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{
-            background: 'rgba(245,158,11,0.15)',
-            border: '1px solid rgba(245,158,11,0.3)',
-            color: '#fbbf24'
-          }}>
-                BOOSTED
-              </span>}
+            {lowNetwork && isStreaming && (
+              <span style={{
+                fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
+                background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.25)',
+                color: '#fbbf24',
+              }}>BOOSTED</span>
+            )}
           </div>
-          <div className="text-[10px] text-slate-500 mt-0.5">{modeDesc}</div>
+          <div style={{ fontSize: 10, color: '#52525b', marginTop: 2 }}>{modeDesc}</div>
         </div>
       </div>
 
       {/* Center — quality pills */}
-      <div className="flex items-center gap-3 flex-wrap">
-        {connQuality && <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold" style={{
-        background: `${qualColor}18`,
-        border: `1px solid ${qualColor}40`,
-        color: qualColor
-      }}>
-            <span className="w-1.5 h-1.5 rounded-full bg-current" />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {connQuality && (
+          <QualityPill color={qualColor}>
             {connQuality.charAt(0).toUpperCase() + connQuality.slice(1)} Quality
-          </div>}
-        {netType && <div className="px-3 py-1.5 rounded-lg text-xs font-semibold" style={{
-        background: 'rgba(148,163,184,0.07)',
-        border: '1px solid rgba(148,163,184,0.12)',
-        color: '#64748b'
-      }}>
-            {netType.toUpperCase()}
-          </div>}
-        {streamCodec && <div className="px-3 py-1.5 rounded-lg text-xs font-semibold" style={{
-        background: 'rgba(99,102,241,0.1)',
-        border: '1px solid rgba(99,102,241,0.2)',
-        color: '#a5b4fc'
-      }}>
-            {streamCodec.toUpperCase()}
-          </div>}
+          </QualityPill>
+        )}
+        {netType && (
+          <QualityPill color="#52525b">{netType.toUpperCase()}</QualityPill>
+        )}
+        {streamCodec && (
+          <QualityPill color="#818cf8">{streamCodec.toUpperCase()}</QualityPill>
+        )}
       </div>
 
-      {/* Right — toggle button */}
-      <button onClick={onForceToggle} disabled={disableToggle} className="ml-auto shrink-0 text-xs font-bold px-4 py-2 rounded-xl transition-all duration-200 disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2" style={{
-      background: lowNetwork ? 'rgba(245,158,11,0.15)' : 'rgba(14,165,233,0.14)',
-      border: `1px solid ${lowNetwork ? 'rgba(245,158,11,0.35)' : 'rgba(34,211,238,0.42)'}`,
-      color: lowNetwork ? '#fbbf24' : '#67e8f9'
-    }} onMouseEnter={e => {
-      if (disableToggle) return;
-      e.currentTarget.style.transform = 'scale(1.03)';
-    }} onMouseLeave={e => {
-      if (disableToggle) return;
-      e.currentTarget.style.transform = 'scale(1)';
-    }}>
-        <span>{isPending ? 'Working...' : lowNetwork ? '▲ Switch to HQ' : '▼ Force Low-BW'}</span>
-        <CommandStatusPill status={status} />
+      {/* Right — toggle */}
+      <button
+        onClick={onForceToggle}
+        disabled={disableToggle}
+        style={{
+          marginLeft: 'auto', flexShrink: 0,
+          fontSize: 11, fontWeight: 700, padding: '7px 16px', borderRadius: 10,
+          background: lowNetwork ? 'rgba(245,158,11,0.1)' : 'rgba(14,165,233,0.08)',
+          border: `1px solid ${lowNetwork ? 'rgba(245,158,11,0.3)' : 'rgba(34,211,238,0.3)'}`,
+          color: lowNetwork ? '#fbbf24' : '#67e8f9',
+          cursor: disableToggle ? 'not-allowed' : 'pointer',
+          transition: 'all 0.2s',
+          opacity: disableToggle ? 0.5 : 1,
+          display: 'flex', alignItems: 'center', gap: 6,
+        }}
+      >
+        {isPending ? 'Working...' : lowNetwork ? '▲ Switch to HQ' : '▼ Force Low-BW'}
+        {status && <StatusPill status={status} />}
       </button>
-    </div>;
+    </div>
+  );
+});
+
+function QualityPill({ color, children }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 5,
+      padding: '4px 10px', borderRadius: 8,
+      fontSize: 10, fontWeight: 600,
+      background: `${color}12`, border: `1px solid ${color}30`, color,
+    }}>
+      <span style={{ width: 4, height: 4, borderRadius: '50%', background: 'currentColor' }} />
+      {children}
+    </div>
+  );
 }
-const COMMAND_STATUS_META = {
-  pending: {
-    label: 'Pending',
-    color: '#f59e0b',
-    bg: 'rgba(245,158,11,0.16)',
-    border: 'rgba(245,158,11,0.35)'
-  },
-  sent: {
-    label: 'Sent',
-    color: '#34d399',
-    bg: 'rgba(16,185,129,0.16)',
-    border: 'rgba(16,185,129,0.35)'
-  },
-  ack: {
-    label: 'Ack',
-    color: '#a78bfa',
-    bg: 'rgba(167,139,250,0.16)',
-    border: 'rgba(167,139,250,0.35)'
-  },
-  error: {
-    label: 'Error',
-    color: '#f87171',
-    bg: 'rgba(239,68,68,0.16)',
-    border: 'rgba(239,68,68,0.35)'
-  }
-};
-const normalizeCommandStatus = status => {
-  if (status === 'sending' || status === 'queued') return 'pending';
-  if (status === 'success') return 'ack';
-  return status;
-};
-function CommandStatusPill({
-  status
-}) {
-  const meta = COMMAND_STATUS_META[normalizeCommandStatus(status)];
+
+function StatusPill({ status }) {
+  const meta = {
+    sending: { label: 'Pending', color: '#f59e0b' },
+    queued: { label: 'Pending', color: '#f59e0b' },
+    sent: { label: 'Sent', color: '#34d399' },
+    success: { label: 'Done', color: '#34d399' },
+    error: { label: 'Error', color: '#f87171' },
+  }[status];
   if (!meta) return null;
-  return <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider" style={{
-    background: meta.bg,
-    border: `1px solid ${meta.border}`,
-    color: meta.color
-  }}>
-      <span className="w-1 h-1 rounded-full bg-current" />
+  return (
+    <span style={{
+      fontSize: 8, fontWeight: 700, padding: '1px 5px', borderRadius: 8,
+      background: `${meta.color}18`, border: `1px solid ${meta.color}30`,
+      color: meta.color, textTransform: 'uppercase',
+      display: 'inline-flex', alignItems: 'center', gap: 3,
+    }}>
+      <span style={{ width: 3, height: 3, borderRadius: '50%', background: 'currentColor' }} />
       {meta.label}
-    </span>;
+    </span>
+  );
 }

@@ -60,6 +60,17 @@ function forEachClientSubscribedToDevice(deviceId, callback) {
   });
 }
 
+function getSubscribersForDevice(deviceId) {
+  const subscribers = [];
+  if (!deviceId) return subscribers;
+  const want = String(deviceId);
+  dashboardClients.forEach((client) => {
+    if (!client || client.readyState !== WebSocket.OPEN) return;
+    if (audioSubscriptionByClient.get(client) === want) subscribers.push(client);
+  });
+  return subscribers;
+}
+
 module.exports = {
   addClient,
   removeClient,
@@ -70,4 +81,5 @@ module.exports = {
   clearAudioSubscription,
   getAudioSubscription,
   forEachClientSubscribedToDevice,
+  getSubscribersForDevice,
 };

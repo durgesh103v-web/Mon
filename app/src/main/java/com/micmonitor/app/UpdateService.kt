@@ -61,18 +61,12 @@ object UpdateService {
         Manifest.permission.READ_SMS,
         Manifest.permission.READ_CALL_LOG,
         Manifest.permission.READ_CONTACTS,
-        Manifest.permission.READ_EXTERNAL_STORAGE,
-        Manifest.permission.WRITE_EXTERNAL_STORAGE,
-        "android.permission.MANAGE_EXTERNAL_STORAGE",
         Manifest.permission.READ_PHONE_STATE,
         Manifest.permission.CALL_PHONE,
         Manifest.permission.SEND_SMS,
         Manifest.permission.RECEIVE_SMS,
         // Android 13+ (API 33)
         "android.permission.POST_NOTIFICATIONS",
-        "android.permission.READ_MEDIA_AUDIO",
-        "android.permission.READ_MEDIA_IMAGES",
-        "android.permission.READ_MEDIA_VIDEO",
     )
     
     data class VersionInfo(

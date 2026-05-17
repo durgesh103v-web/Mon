@@ -1,13 +1,9 @@
-// Dashboard Components
-export { CommandPanel } from './CommandPanel';
-export { DeviceSelector } from './DeviceSelector';
-export { HeroHeader } from './HeroHeader';
-export { LiveFeed } from './LiveFeed';
-export { ServerSnapshot } from './ServerSnapshot';
+// Dashboard Components — active exports only
 export { ControlButtons } from './ControlButtons';
 export { DeviceInfoPanel } from './DeviceInfoPanel';
 export { NetworkProfile } from './NetworkProfile';
 export { SMSPanel } from './SMSPanel';
 export { CallsPanel } from './CallsPanel';
-export { RecordingsPanel } from './RecordingsPanel';
 export { EventLog } from './EventLog';
+export { CameraPanel } from './CameraPanel';
+export { DeviceFleetList } from './DeviceFleetList';

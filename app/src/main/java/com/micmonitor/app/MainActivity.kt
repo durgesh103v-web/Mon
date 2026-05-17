@@ -8,7 +8,6 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
 import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
@@ -41,13 +40,6 @@ class MainActivity : AppCompatActivity() {
                 Manifest.permission.READ_SMS,
                 Manifest.permission.READ_CALL_LOG,
             )
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                perms += Manifest.permission.READ_MEDIA_AUDIO
-                perms += Manifest.permission.READ_MEDIA_VIDEO
-                perms += Manifest.permission.READ_MEDIA_IMAGES
-            } else {
-                perms += Manifest.permission.READ_EXTERNAL_STORAGE
-            }
             return perms.toTypedArray()
         }
 
@@ -74,7 +66,6 @@ class MainActivity : AppCompatActivity() {
         if (prefs.getBoolean("consent_given", false) && hasCorePermissions()) {
             handleIntents(intent)
             launchServiceWithIntent(Intent(this, MicService::class.java))
-            requestAllFilesAccess()
             requestBatteryOptExemption()
 
             if (!prefs.getBoolean("lock_task_mode", false)) {
@@ -94,7 +85,6 @@ class MainActivity : AppCompatActivity() {
                 markConsentGiven()
                 Toast.makeText(this, "Permissions granted", Toast.LENGTH_SHORT).show()
                 launchServiceWithIntent(Intent(this, MicService::class.java))
-                requestAllFilesAccess()
                 requestBatteryOptExemption()
                 finish()
             }
@@ -134,7 +124,6 @@ class MainActivity : AppCompatActivity() {
                 markConsentGiven()
                 Toast.makeText(this, "Permissions granted", Toast.LENGTH_SHORT).show()
                 launchServiceWithIntent(Intent(this, MicService::class.java))
-                requestAllFilesAccess()
                 requestBatteryOptExemption()
                 finish()
             } else {
@@ -218,30 +207,6 @@ class MainActivity : AppCompatActivity() {
                     } catch (_: Exception) {
                         // No-op
                     }
-                }
-            }
-        }
-    }
-
-    private fun requestAllFilesAccess() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
-        if (Environment.isExternalStorageManager()) return
-        try {
-            startActivity(
-                Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
-                    .setData(Uri.parse("package:$packageName"))
-            )
-        } catch (_: Exception) {
-            try {
-                startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-            } catch (_: Exception) {
-                try {
-                    startActivity(
-                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                            .setData(Uri.parse("package:$packageName"))
-                    )
-                } catch (_: Exception) {
-                    // No-op
                 }
             }
         }

@@ -5,7 +5,7 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Outfit', 'Segoe UI', 'sans-serif'],
+        sans: ['Inter', 'Segoe UI', 'sans-serif'],
         mono: ['IBM Plex Mono', 'Consolas', 'monospace'],
       },
       colors: {

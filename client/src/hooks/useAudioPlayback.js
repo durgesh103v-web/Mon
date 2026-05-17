@@ -40,6 +40,9 @@ export function useAudioPlayback() {
     volume: 1.0,
     latencyMs: 0,
     bufferHealth: 0,
+    playbackStatus: 'Idle',
+    droppingPackets: false,
+    lowNetwork: false,
     lastDeviceId: null,
     waveform: null
   });
@@ -95,6 +98,7 @@ export function useAudioPlayback() {
       return {
         deviceId: explicitDeviceId || 'unknown',
         audio: upsampled,
+        codec: 'mulaw8k',
         sampleRate: SAMPLE_RATE
       };
     } else {
@@ -107,6 +111,7 @@ export function useAudioPlayback() {
       return {
         deviceId: explicitDeviceId || 'unknown',
         audio: floats,
+        codec: 'pcm16',
         sampleRate: SAMPLE_RATE
       };
     }
@@ -153,7 +158,7 @@ export function useAudioPlayback() {
                   const chunk = data.chunk instanceof Float32Array ? data.chunk : new Float32Array(data.chunk);
                   this.queue.push({ chunk, offset: 0 });
                   this.totalQueued += chunk.length;
-                  const maxSamples = Number(data.maxSamples || 8000);
+                  const maxSamples = Number(data.maxSamples || 4800);
                   while (this.totalQueued > maxSamples && this.queue.length > 1) {
                     const dropped = this.queue.shift();
                     if (dropped) this.totalQueued -= (dropped.chunk.length - dropped.offset);
@@ -164,6 +169,11 @@ export function useAudioPlayback() {
 
             process(inputs, outputs) {
               const out = outputs[0][0];
+              const targetSamples = 1600; // 100ms jitter buffer
+              if (this.totalQueued > 0 && this.totalQueued < targetSamples) {
+                out.fill(0);
+                return true;
+              }
               let written = 0;
               while (written < out.length && this.queue.length > 0) {
                 const head = this.queue[0];
@@ -223,14 +233,16 @@ export function useAudioPlayback() {
           const now = Date.now();
           if (now - lastStateUpdateRef.current >= 100) {
             lastStateUpdateRef.current = now;
-            const startupBoost = now - streamStartAtRef.current < 3000;
-            const capSamples = startupBoost ? SAMPLE_RATE * 3 : SAMPLE_RATE * 1.5;
             const totalSamples = workletQueueSamplesRef.current;
+            const lagging = totalSamples > SAMPLE_RATE * 0.22;
+            const capSamples = SAMPLE_RATE * 0.12;
             const bufferHealth = Math.min(1, totalSamples / capSamples);
             setState(prev => ({
               ...prev,
               bufferHealth,
               latencyMs: Math.round(totalSamples / SAMPLE_RATE * 1000),
+              playbackStatus: lagging ? 'Lagging' : 'Live',
+              droppingPackets: lagging,
               lastDeviceId: lastDeviceIdRef.current,
               waveform: new Float32Array(waveform)
             }));
@@ -278,14 +290,16 @@ export function useAudioPlayback() {
       const now = Date.now();
       if (now - lastStateUpdateRef.current >= 100) {
         lastStateUpdateRef.current = now;
-        const startupBoost = now - streamStartAtRef.current < 3000;
-        const capSamples = startupBoost ? SAMPLE_RATE * 3 : SAMPLE_RATE * 1.5;
+        const capSamples = SAMPLE_RATE * 0.12;
         const totalSamples = queue.reduce((acc, c) => acc + c.length, 0);
+        const lagging = totalSamples > SAMPLE_RATE * 0.22;
         const bufferHealth = Math.min(1, totalSamples / capSamples);
         setState(prev => ({
           ...prev,
           bufferHealth,
           latencyMs: Math.round(totalSamples / SAMPLE_RATE * 1000),
+          playbackStatus: lagging ? 'Lagging' : 'Live',
+          droppingPackets: lagging,
           lastDeviceId: lastDeviceIdRef.current,
           waveform: new Float32Array(waveform)
         }));
@@ -322,7 +336,11 @@ export function useAudioPlayback() {
     setState(prev => ({
       ...prev,
       isPlaying: false,
-      bufferHealth: 0
+      bufferHealth: 0,
+      latencyMs: 0,
+      playbackStatus: 'Idle',
+      droppingPackets: false,
+      lowNetwork: false
     }));
   }, []);
 
@@ -343,8 +361,10 @@ export function useAudioPlayback() {
     if (!parsed) return;
     
     lastDeviceIdRef.current = parsed.deviceId;
-    const startupBoost = Date.now() - streamStartAtRef.current < 3000;
-    const maxSamples = startupBoost ? SAMPLE_RATE * 3 : SAMPLE_RATE * 1.5;
+    if (parsed.codec === 'mulaw8k') {
+      setState(prev => prev.lowNetwork ? prev : { ...prev, lowNetwork: true });
+    }
+    const maxSamples = SAMPLE_RATE * 0.35;
 
     if (usingWorkletRef.current && workletNodeRef.current) {
       const chunk = parsed.audio;

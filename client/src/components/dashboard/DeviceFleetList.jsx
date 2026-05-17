@@ -1,79 +1,123 @@
-export function DeviceFleetList({
+import { memo } from 'react';
+
+export const DeviceFleetList = memo(function DeviceFleetList({
   devices,
   selectedDeviceId,
   setSelectedDeviceId,
   onCommand,
-  pendingCommands = {}
+  pendingCommands = {},
 }) {
   if (devices.length === 0) return null;
-  return <div className="mb-6">
-      <div className="text-[10px] uppercase tracking-widest font-bold text-indigo-400 mb-4 flex items-center gap-2">
-        <span className="flex-1 h-px" style={{
-        background: 'linear-gradient(90deg, rgba(34,211,238,0.5), transparent)'
-      }} />
-        Device Fleet
-        <span className="flex-1 h-px" style={{
-        background: 'linear-gradient(90deg, transparent, rgba(34,211,238,0.5))'
-      }} />
-      </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+  return (
+    <div style={{ marginBottom: 4 }}>
+      <div className="section-label">Device Fleet</div>
+
+      <div style={{
+        display: 'grid', gap: 12,
+        gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+      }}>
         {devices.map(device => {
-        const isSelected = selectedDeviceId === device.deviceId;
-        const health = device.health || {};
-        const isOffline = health.wsConnected === false;
+          const isSelected = selectedDeviceId === device.deviceId;
+          const health = device.health || {};
+          const isOffline = health.wsConnected === false;
+          const isWaking = pendingCommands[`${device.deviceId}:wake_device`]?.status === 'sending';
 
-        // Check if a wake command is currently firing for this specific device
-        const isWaking = pendingCommands[`${device.deviceId}:wake_device`]?.status === 'sending';
-        return <div key={device.deviceId} onClick={() => setSelectedDeviceId(device.deviceId)} className={`relative p-4 rounded-xl transition-all duration-300 cursor-pointer overflow-hidden flex flex-col justify-between gap-4 ${isOffline ? 'opacity-80 grayscale-[0.3]' : ''}`} style={{
-          background: isSelected ? 'linear-gradient(140deg, rgba(14,165,233,0.2), rgba(34,197,94,0.14))' : 'linear-gradient(165deg, rgba(15,23,42,0.7), rgba(10,16,29,0.62))',
-          border: `1px solid ${isSelected ? 'rgba(34,211,238,0.5)' : 'rgba(148,163,184,0.16)'}`,
-          boxShadow: isSelected ? '0 0 22px rgba(34,211,238,0.18)' : '0 8px 16px rgba(0,0,0,0.24)'
-        }}>
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full flex items-center justify-center text-xl shrink-0" style={{
-              background: 'rgba(15,23,42,0.75)',
-              border: '1px solid rgba(71,85,105,0.55)'
-            }}>
+          return (
+            <div
+              key={device.deviceId}
+              onClick={() => setSelectedDeviceId(device.deviceId)}
+              style={{
+                position: 'relative', padding: 16, borderRadius: 14,
+                cursor: 'pointer', overflow: 'hidden',
+                display: 'flex', flexDirection: 'column', gap: 12,
+                background: isSelected
+                  ? 'linear-gradient(140deg, rgba(14,165,233,0.12), rgba(34,197,94,0.08))'
+                  : 'rgba(15,15,20,0.6)',
+                border: `1px solid ${isSelected ? 'rgba(34,211,238,0.35)' : 'rgba(63,63,70,0.3)'}`,
+                boxShadow: isSelected ? '0 0 18px rgba(34,211,238,0.1)' : '0 4px 12px rgba(0,0,0,0.2)',
+                transition: 'all 0.25s ease',
+                opacity: isOffline ? 0.7 : 1,
+                filter: isOffline ? 'grayscale(0.2)' : 'none',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{
+                  width: 44, height: 44, borderRadius: '50%',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 18, flexShrink: 0,
+                  background: 'rgba(15,23,42,0.6)', border: '1px solid rgba(63,63,70,0.4)',
+                }}>
                   {isOffline ? '💤' : '📱'}
                 </div>
-                <div className="min-w-0 flex-1">
-                  <div className="font-semibold text-slate-100 truncate">
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, color: '#e4e4e7', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {device.model || 'Unknown Device'}
                   </div>
-                  <div className="text-[10px] text-slate-400 font-mono mt-0.5 truncate">
+                  <div style={{ fontSize: 9, color: '#52525b', fontFamily: "'IBM Plex Mono', monospace", marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {device.deviceId}
                   </div>
-                  <div className="flex items-center gap-3 mt-2">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
                     <StatusDot active={!isOffline} label={isOffline ? 'Offline' : 'Online'} />
-                    {health.batteryPct != null && <span className="text-[10px] text-slate-400 font-medium">🔋 {health.batteryPct}%</span>}
+                    {health.batteryPct != null && (
+                      <span style={{ fontSize: 10, color: '#71717a', fontWeight: 500 }}>
+                        🔋 {health.batteryPct}%
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
 
-              {/* Inline Wake Button for Offline Devices */}
-              {isOffline && onCommand && <div className="mt-2 pt-3 border-t border-slate-700/50">
-                  <button onClick={e => {
-              e.stopPropagation();
-              setSelectedDeviceId(device.deviceId);
-              onCommand('wake_device');
-            }} disabled={isWaking} className="w-full py-2 rounded-lg bg-amber-500/10 text-amber-500 border border-amber-500/30 text-[10px] font-bold hover:bg-amber-500/20 transition-all uppercase tracking-wider disabled:opacity-50">
-                    {isWaking ? '⚡ WAKING...' : '⚡ FORCE WAKE'}
+              {/* Wake button for offline devices */}
+              {isOffline && onCommand && (
+                <div style={{ paddingTop: 10, borderTop: '1px solid rgba(63,63,70,0.3)' }}>
+                  <button
+                    onClick={e => {
+                      e.stopPropagation();
+                      setSelectedDeviceId(device.deviceId);
+                      onCommand('wake_device');
+                    }}
+                    disabled={isWaking}
+                    style={{
+                      width: '100%', padding: '7px 0', borderRadius: 8,
+                      fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em',
+                      background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)',
+                      color: '#f59e0b', cursor: isWaking ? 'not-allowed' : 'pointer',
+                      transition: 'all 0.15s', opacity: isWaking ? 0.6 : 1,
+                    }}
+                  >
+                    {isWaking ? '⚡ Waking...' : '⚡ Force Wake'}
                   </button>
-                </div>}
+                </div>
+              )}
 
-              {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-cyan-400 to-emerald-400" />}
-            </div>;
-      })}
+              {/* Selected indicator */}
+              {isSelected && (
+                <div style={{
+                  position: 'absolute', left: 0, top: 0, bottom: 0, width: 3,
+                  background: 'linear-gradient(to bottom, #22d3ee, #10b981)',
+                  borderRadius: '0 2px 2px 0',
+                }} />
+              )}
+            </div>
+          );
+        })}
       </div>
-    </div>;
-}
-function StatusDot({
-  active,
-  label
-}) {
-  return <div className="flex items-center gap-1.5">
-      <span className={`w-2 h-2 rounded-full ${active ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`} />
-      <span className="text-[10px] text-slate-400 uppercase tracking-widest">{label}</span>
-    </div>;
+    </div>
+  );
+});
+
+function StatusDot({ active, label }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+      <span style={{
+        width: 6, height: 6, borderRadius: '50%',
+        background: active ? '#10b981' : '#ef4444',
+        animation: active ? 'beatBar 0.8s ease-in-out infinite alternate' : 'none',
+      }} />
+      <span style={{ fontSize: 9, color: '#71717a', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>
+        {label}
+      </span>
+    </div>
+  );
 }

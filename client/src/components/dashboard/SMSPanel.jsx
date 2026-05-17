@@ -1,39 +1,75 @@
-export function SMSPanel({
-  messages
-}) {
-  if (messages.length === 0) {
-    return <div className="rounded-lg border border-slate-700/50 bg-slate-800/30 overflow-hidden">
-        <div className="flex items-center gap-2 px-4 py-2 bg-emerald-500/20 border-b border-slate-700/50">
-          <span className="text-emerald-400">●</span>
-          <span className="text-sm font-medium text-white">SMS</span>
-          <span className="ml-auto text-xs text-slate-500">0 messages</span>
-        </div>
-        <div className="p-4 text-center text-slate-500 text-sm">
-          No SMS data received yet. Click "Sync Data" to fetch.
-        </div>
-      </div>;
-  }
-  return <div className="rounded-lg border border-slate-700/50 bg-slate-800/30 overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-2 bg-emerald-500/20 border-b border-slate-700/50">
-        <span className="text-emerald-400">●</span>
-        <span className="text-sm font-medium text-white">SMS</span>
-        <span className="ml-auto text-xs text-slate-500">{messages.length} messages</span>
+import { memo } from 'react';
+
+export const SMSPanel = memo(function SMSPanel({ messages }) {
+  return (
+    <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
+      {/* Header */}
+      <div style={{
+        padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 8,
+        background: 'rgba(16,185,129,0.06)', borderBottom: '1px solid rgba(16,185,129,0.12)',
+      }}>
+        <span style={{ fontSize: 14 }}>💬</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: '#e4e4e7', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+          SMS
+        </span>
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: '#52525b', fontWeight: 500 }}>
+          {messages.length} messages
+        </span>
       </div>
-      
-      <div className="max-h-64 overflow-y-auto">
-        {messages.map(msg => <div key={msg.id} className="border-b border-slate-700/30 px-4 py-2 hover:bg-slate-700/20 transition-colors">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="font-semibold text-sm text-white truncate max-w-[150px]">{msg.sender}</span>
-              <span className={`px-1.5 py-0.5 text-[9px] rounded ${msg.type === 'inbox' ? 'bg-blue-500/20 text-blue-400' : msg.type === 'sent' ? 'bg-green-500/20 text-green-400' : 'bg-slate-500/20 text-slate-400'}`}>
-                {msg.type.toUpperCase()}
-              </span>
-              {!msg.read && msg.type === 'inbox' && <span className="px-1.5 py-0.5 text-[9px] bg-red-500/20 text-red-400 rounded">UNREAD</span>}
-              <span className="ml-auto text-[10px] text-slate-500">
-                {new Date(msg.timestamp).toLocaleString()}
-              </span>
+
+      {messages.length === 0 ? (
+        <div style={{ padding: '32px 16px', textAlign: 'center', color: '#52525b', fontSize: 12 }}>
+          <div style={{ fontSize: 24, marginBottom: 6, opacity: 0.3 }}>💬</div>
+          No SMS data yet. Tap "Sync Data" to fetch.
+        </div>
+      ) : (
+        <div style={{ maxHeight: 280, overflowY: 'auto' }}>
+          {messages.map(msg => (
+            <div key={msg.id} style={{
+              padding: '8px 14px', borderBottom: '1px solid rgba(63,63,70,0.2)',
+              transition: 'background 0.15s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(63,63,70,0.1)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#e4e4e7', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {msg.sender}
+                </span>
+                <TypeBadge type={msg.type} />
+                {!msg.read && msg.type === 'inbox' && (
+                  <span style={{
+                    fontSize: 8, fontWeight: 700, padding: '1px 5px', borderRadius: 4,
+                    background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)',
+                    color: '#f87171', textTransform: 'uppercase',
+                  }}>Unread</span>
+                )}
+                <span style={{ marginLeft: 'auto', fontSize: 9, color: '#52525b' }}>
+                  {new Date(msg.timestamp).toLocaleString()}
+                </span>
+              </div>
+              <p style={{
+                fontSize: 11, color: '#a1a1aa', margin: 0, lineHeight: 1.4,
+                display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+              }}>{msg.body}</p>
             </div>
-            <p className="text-xs text-slate-400 line-clamp-2">{msg.body}</p>
-          </div>)}
-      </div>
-    </div>;
+          ))}
+        </div>
+      )}
+    </div>
+  );
+});
+
+function TypeBadge({ type }) {
+  const meta = {
+    inbox: { bg: 'rgba(96,165,250,0.12)', border: 'rgba(96,165,250,0.25)', color: '#60a5fa' },
+    sent: { bg: 'rgba(16,185,129,0.12)', border: 'rgba(16,185,129,0.25)', color: '#34d399' },
+  }[type] || { bg: 'rgba(82,82,91,0.12)', border: 'rgba(82,82,91,0.25)', color: '#71717a' };
+  return (
+    <span style={{
+      fontSize: 8, fontWeight: 700, padding: '1px 5px', borderRadius: 4,
+      background: meta.bg, border: `1px solid ${meta.border}`,
+      color: meta.color, textTransform: 'uppercase', letterSpacing: '0.05em',
+    }}>{type}</span>
+  );
 }
