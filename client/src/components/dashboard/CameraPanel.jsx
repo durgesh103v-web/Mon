@@ -6,6 +6,13 @@ const QUALITY_OPTIONS = [
   { label: 'HD', value: 'hd', desc: 'Optional HD capture' },
 ];
 
+const NIGHT_OPTIONS = [
+  { label: 'Off', value: 'off' },
+  { label: 'Low', value: '1s' },
+  { label: 'Med', value: '3s' },
+  { label: 'High', value: '5s' },
+];
+
 function formatFileSize(bytes) {
   if (!bytes || bytes <= 0) return 'Size pending';
   if (bytes < 1024) return `${bytes} B`;
@@ -48,18 +55,25 @@ const PhotoPreview = memo(function PhotoPreview({ photo, onClose }) {
           <div className="eyebrow">Preview</div>
           <h3>{photo.camera === 'screenshot' ? 'Screenshot' : `${photo.camera} camera`}</h3>
         </div>
-        <button className="icon-button" onClick={onClose} type="button" title="Close preview">x</button>
+        <div className="photo-preview-actions">
+          <a className="preview-action-button" href={photo.url} target="_blank" rel="noreferrer" title="Open full page">
+            Open Full Page
+          </a>
+          <button className="icon-button" onClick={onClose} type="button" title="Close preview">x</button>
+        </div>
       </div>
 
       <div className="photo-preview-frame">
-        <img
-          src={photo.url}
-          alt={photo.filename || 'Captured photo preview'}
-          onLoad={event => {
-            const img = event.currentTarget;
-            setDimensions(`${img.naturalWidth} x ${img.naturalHeight}`);
-          }}
-        />
+        <a href={photo.url} target="_blank" rel="noreferrer" title="Open image full page">
+          <img
+            src={photo.url}
+            alt={photo.filename || 'Captured photo preview'}
+            onLoad={event => {
+              const img = event.currentTarget;
+              setDimensions(`${img.naturalWidth} x ${img.naturalHeight}`);
+            }}
+          />
+        </a>
       </div>
 
       <div className="photo-meta-grid">
@@ -93,7 +107,7 @@ export const CameraPanel = memo(function CameraPanel({
 }) {
   const [selectedPhoto, setSelectedPhoto] = useState(null);
   const [photoQuality, setPhotoQuality] = useState(health?.photoQuality || 'normal');
-  const [nightEnhance, setNightEnhance] = useState(health?.photoNight && health.photoNight !== 'off');
+  const [nightMode, setNightMode] = useState(health?.photoNight || 'off');
   const [lastCaptureType, setLastCaptureType] = useState(null);
 
   const statusFor = useCallback((cmd) => {
@@ -136,11 +150,10 @@ export const CameraPanel = memo(function CameraPanel({
     onCommand('photo_quality', { mode });
   }, [onCommand]);
 
-  const toggleNight = useCallback(() => {
-    const enabled = !nightEnhance;
-    setNightEnhance(enabled);
-    onCommand('photo_night', { mode: enabled ? '1s' : 'off' });
-  }, [nightEnhance, onCommand]);
+  const handleNightMode = useCallback((mode) => {
+    setNightMode(mode);
+    onCommand('photo_night', { mode });
+  }, [onCommand]);
 
   return (
     <section className="camera-workspace">
@@ -177,16 +190,29 @@ export const CameraPanel = memo(function CameraPanel({
           </div>
         </div>
 
+        <div className="control-block">
+          <div className="control-label">Night Enhance</div>
+          <div className="segmented-control night-mode-control">
+            {NIGHT_OPTIONS.map(option => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => handleNightMode(option.value)}
+                disabled={disabledAll || (health?.lowNetwork && option.value !== 'off')}
+                className={nightMode === option.value ? 'is-selected' : ''}
+                title={health?.lowNetwork ? 'Night enhancement is limited in low network mode' : `Night mode ${option.label}`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="camera-toggle-row">
-          <button
-            type="button"
-            className={`toggle-row ${nightEnhance ? 'is-on' : ''}`}
-            onClick={toggleNight}
-            disabled={disabledAll}
-          >
-            <span>Night Enhance</span>
-            <strong>{nightEnhance ? 'On' : 'Off'}</strong>
-          </button>
+          <div className={`upload-status-card ${nightMode !== 'off' ? 'is-on' : ''}`}>
+            <span>Night Mode</span>
+            <strong>{NIGHT_OPTIONS.find(item => item.value === nightMode)?.label || 'Off'}</strong>
+          </div>
           <div className="upload-status-card">
             <span>Upload Status</span>
             <strong>{uploadStatus}</strong>

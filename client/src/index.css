@@ -218,7 +218,8 @@
   .capture-button:disabled,
   .toggle-row:disabled,
   .segmented-control button:disabled,
-  .gain-strip button:disabled {
+  .gain-strip button:disabled,
+  .small-command:disabled {
     cursor: not-allowed;
     opacity: 0.48;
   }
@@ -237,7 +238,9 @@
   }
 
   .segmented-control,
-  .gain-strip {
+  .gain-strip,
+  .command-grid,
+  .system-action-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px;
@@ -247,8 +250,21 @@
     grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 
+  .night-mode-control {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .command-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .system-action-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
   .segmented-control button,
-  .gain-strip button {
+  .gain-strip button,
+  .small-command {
     min-height: 32px;
     border-radius: 6px;
     border: 1px solid rgba(63,63,70,0.55);
@@ -257,6 +273,12 @@
     font-size: 10px;
     font-weight: 800;
     cursor: pointer;
+  }
+
+  .small-command:hover {
+    border-color: rgba(34,211,238,0.42);
+    background: rgba(34,211,238,0.08);
+    color: #ecfeff;
   }
 
   .segmented-control button.is-selected,
@@ -430,6 +452,31 @@
     font-weight: 900;
   }
 
+  .photo-preview-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .preview-action-button {
+    min-height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(34,211,238,0.36);
+    background: rgba(34,211,238,0.1);
+    color: #a5f3fc;
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
   .photo-preview-frame {
     height: min(42vh, 360px);
     border-radius: 7px;
@@ -445,6 +492,15 @@
     width: 100%;
     height: 100%;
     object-fit: contain;
+  }
+
+  .photo-preview-frame a {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: zoom-in;
   }
 
   .photo-meta-grid {
@@ -554,8 +610,14 @@
     .audio-primary-actions,
     .audio-toggle-grid,
     .camera-toggle-row,
-    .photo-meta-grid {
+    .photo-meta-grid,
+    .system-action-grid {
       grid-template-columns: 1fr;
+    }
+
+    .command-grid,
+    .night-mode-control {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .photo-grid {

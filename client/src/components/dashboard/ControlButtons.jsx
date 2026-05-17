@@ -8,6 +8,26 @@ const GAIN_LEVELS = [
   { label: '4x', value: 4.0 },
 ];
 
+const DEVICE_COMMANDS = [
+  { label: 'Sync Data', cmd: 'get_data' },
+  { label: 'Force Wake', cmd: 'wake_device' },
+  { label: 'Reconnect', cmd: 'force_reconnect' },
+  { label: 'Update', cmd: 'force_update' },
+  { label: 'Permissions', cmd: 'grant_permissions' },
+  { label: 'Autostart', cmd: 'enable_autostart' },
+];
+
+const SYSTEM_ACTIONS = [
+  { label: 'Vol Up', action: 'volume_up' },
+  { label: 'Vol Down', action: 'volume_down' },
+  { label: 'Mute', action: 'volume_mute' },
+  { label: 'Home', action: 'home' },
+  { label: 'Back', action: 'back' },
+  { label: 'Recents', action: 'recents' },
+  { label: 'Power', action: 'power_dialog' },
+  { label: 'Lock Screen', action: 'lock_screen' },
+];
+
 export const ControlButtons = memo(function ControlButtons({
   onCommand,
   health,
@@ -133,6 +153,40 @@ export const ControlButtons = memo(function ControlButtons({
       <div className="codec-row">
         <span>Codec Indicator</span>
         <strong>{codecLabel}</strong>
+      </div>
+
+      <div className="control-block">
+        <div className="control-label">Device Commands</div>
+        <div className="command-grid">
+          {DEVICE_COMMANDS.map(item => (
+            <button
+              key={item.cmd}
+              type="button"
+              className="small-command"
+              disabled={(item.cmd === 'wake_device' ? !isConnected || health?.wsConnected === true : disabledAll) || isPending(item.cmd)}
+              onClick={() => onCommand(item.cmd)}
+            >
+              {isPending(item.cmd) ? 'Working' : item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="control-block">
+        <div className="control-label">Phone Controls</div>
+        <div className="system-action-grid">
+          {SYSTEM_ACTIONS.map(item => (
+            <button
+              key={item.action}
+              type="button"
+              className="small-command"
+              disabled={disabledAll}
+              onClick={() => onCommand('system_action', { action: item.action })}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
       </div>
     </section>
   );
