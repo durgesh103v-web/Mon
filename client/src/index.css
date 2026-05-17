@@ -167,6 +167,7 @@
   }
 
   .audio-primary-actions,
+  .listen-toggle-row,
   .camera-action-grid,
   .audio-toggle-grid,
   .camera-toggle-row {
@@ -177,6 +178,10 @@
 
   .camera-action-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .listen-toggle-row {
+    grid-template-columns: 1fr;
   }
 
   .primary-command,
@@ -191,7 +196,14 @@
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 0.05em;
+    white-space: normal;
+    overflow-wrap: anywhere;
     transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+  }
+
+  .listen-toggle {
+    min-height: 46px;
+    font-size: 12px;
   }
 
   .primary-command:hover,
@@ -265,7 +277,7 @@
   .segmented-control button,
   .gain-strip button,
   .small-command {
-    min-height: 32px;
+    min-height: 36px;
     border-radius: 6px;
     border: 1px solid rgba(63,63,70,0.55);
     background: rgba(24,24,27,0.72);
@@ -273,12 +285,23 @@
     font-size: 10px;
     font-weight: 800;
     cursor: pointer;
+    line-height: 1.15;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: center;
+    padding: 6px 7px;
   }
 
   .small-command:hover {
     border-color: rgba(34,211,238,0.42);
     background: rgba(34,211,238,0.08);
     color: #ecfeff;
+  }
+
+  .small-command {
+    background: rgba(30, 35, 46, 0.76);
+    border-color: rgba(82,82,91,0.58);
+    color: #d4d4d8;
   }
 
   .segmented-control button.is-selected,

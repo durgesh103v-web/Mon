@@ -33,7 +33,7 @@ export const SMSPanel = memo(function SMSPanel({ messages }) {
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: '#e4e4e7', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#e4e4e7', minWidth: 0, overflowWrap: 'anywhere' }}>
                   {msg.sender}
                 </span>
                 <TypeBadge type={msg.type} />
@@ -49,8 +49,8 @@ export const SMSPanel = memo(function SMSPanel({ messages }) {
                 </span>
               </div>
               <p style={{
-                fontSize: 11, color: '#a1a1aa', margin: 0, lineHeight: 1.4,
-                display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                fontSize: 11, color: '#a1a1aa', margin: 0, lineHeight: 1.45,
+                whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
               }}>{msg.body}</p>
             </div>
           ))}

@@ -52,10 +52,10 @@ export const CallsPanel = memo(function CallsPanel({ calls }) {
                 <span style={{ fontSize: 16, flexShrink: 0 }}>{meta.icon}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: '#e4e4e7', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#e4e4e7', overflowWrap: 'anywhere' }}>
                       {call.number}
                     </span>
-                    {call.name && <span style={{ fontSize: 10, color: '#71717a' }}>({call.name})</span>}
+                    {call.name && <span style={{ fontSize: 10, color: '#71717a', overflowWrap: 'anywhere' }}>({call.name})</span>}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
                     <span style={{

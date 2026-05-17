@@ -9,23 +9,23 @@ const GAIN_LEVELS = [
 ];
 
 const DEVICE_COMMANDS = [
-  { label: 'Sync Data', cmd: 'get_data' },
-  { label: 'Force Wake', cmd: 'wake_device' },
-  { label: 'Reconnect', cmd: 'force_reconnect' },
-  { label: 'Update', cmd: 'force_update' },
-  { label: 'Permissions', cmd: 'grant_permissions' },
-  { label: 'Autostart', cmd: 'enable_autostart' },
+  { label: 'Sync Data', short: 'Sync', cmd: 'get_data' },
+  { label: 'Force Wake', short: 'Wake', cmd: 'wake_device' },
+  { label: 'Reconnect', short: 'Reconnect', cmd: 'force_reconnect' },
+  { label: 'Force Update', short: 'Update', cmd: 'force_update' },
+  { label: 'Grant Permissions', short: 'Perms', cmd: 'grant_permissions' },
+  { label: 'Enable Autostart', short: 'Autostart', cmd: 'enable_autostart' },
 ];
 
 const SYSTEM_ACTIONS = [
-  { label: 'Vol Up', action: 'volume_up' },
-  { label: 'Vol Down', action: 'volume_down' },
-  { label: 'Mute', action: 'volume_mute' },
-  { label: 'Home', action: 'home' },
-  { label: 'Back', action: 'back' },
-  { label: 'Recents', action: 'recents' },
-  { label: 'Power', action: 'power_dialog' },
-  { label: 'Lock Screen', action: 'lock_screen' },
+  { label: 'Volume Up', short: 'Vol Up', action: 'volume_up' },
+  { label: 'Volume Down', short: 'Vol Down', action: 'volume_down' },
+  { label: 'Mute', short: 'Mute', action: 'volume_mute' },
+  { label: 'Home', short: 'Home', action: 'home' },
+  { label: 'Back', short: 'Back', action: 'back' },
+  { label: 'Recents', short: 'Recents', action: 'recents' },
+  { label: 'Power Menu', short: 'Power', action: 'power_dialog' },
+  { label: 'Lock Screen', short: 'Lock', action: 'lock_screen' },
 ];
 
 export const ControlButtons = memo(function ControlButtons({
@@ -103,22 +103,18 @@ export const ControlButtons = memo(function ControlButtons({
         <span className={`status-pill ${isStreaming ? 'good' : ''}`}>{isStreaming ? 'Live' : 'Idle'}</span>
       </div>
 
-      <div className="audio-primary-actions">
+      <div className="listen-toggle-row">
         <button
           type="button"
-          className={`primary-command ${isStreaming ? 'is-live' : ''}`}
-          disabled={disabledAll || isPending('start_stream')}
-          onClick={() => onCommand('start_stream')}
+          className={`primary-command listen-toggle ${isStreaming ? 'is-live danger' : ''}`}
+          disabled={disabledAll || isPending(isStreaming ? 'stop_stream' : 'start_stream')}
+          onClick={() => onCommand(isStreaming ? 'stop_stream' : 'start_stream')}
         >
-          Start Listen
-        </button>
-        <button
-          type="button"
-          className="primary-command danger"
-          disabled={disabledAll || isPending('stop_stream')}
-          onClick={() => onCommand('stop_stream')}
-        >
-          Stop Listen
+          {isPending(isStreaming ? 'stop_stream' : 'start_stream')
+            ? 'Working'
+            : isStreaming
+              ? 'Stop Listen'
+              : 'Start Listen'}
         </button>
       </div>
 
@@ -165,8 +161,9 @@ export const ControlButtons = memo(function ControlButtons({
               className="small-command"
               disabled={(item.cmd === 'wake_device' ? !isConnected || health?.wsConnected === true : disabledAll) || isPending(item.cmd)}
               onClick={() => onCommand(item.cmd)}
+              title={item.label}
             >
-              {isPending(item.cmd) ? 'Working' : item.label}
+              {isPending(item.cmd) ? 'Working' : item.short}
             </button>
           ))}
         </div>
@@ -182,8 +179,9 @@ export const ControlButtons = memo(function ControlButtons({
               className="small-command"
               disabled={disabledAll}
               onClick={() => onCommand('system_action', { action: item.action })}
+              title={item.label}
             >
-              {item.label}
+              {item.short}
             </button>
           ))}
         </div>
