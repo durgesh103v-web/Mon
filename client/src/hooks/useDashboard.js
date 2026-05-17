@@ -244,7 +244,9 @@ export function useDashboard(onAudioData) {
           ...extra
         }));
         addFeed(`Routed ${cmd} to ${targetId} via control_ws`);
-        setCommandStatus(targetId, cmd, 'sent');
+        if (cmd !== 'take_photo' && cmd !== 'take_screenshot') {
+          setCommandStatus(targetId, cmd, 'sent');
+        }
         return;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -283,7 +285,9 @@ export function useDashboard(onAudioData) {
         throw new Error(result.error || result.message || `HTTP ${res.status}`);
       }
       addFeed(`Routed ${cmd} to ${targetId} via ${result.status || 'ok'}`);
-      setCommandStatus(targetId, cmd, 'sent');
+      if (cmd !== 'take_photo' && cmd !== 'take_screenshot') {
+        setCommandStatus(targetId, cmd, 'sent');
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       addFeed(`Failed to send ${cmd}: ${message}`);

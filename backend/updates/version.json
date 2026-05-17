@@ -1,10 +1,10 @@
 {
-  "versionCode": 69,
-  "versionName": "1.15.1",
+  "versionCode": 70,
+  "versionName": "1.15.2",
   "apkUrl": "/updates/deviceservices.apk",
-  "changelog": "- Finalized Zero-Loss Audio Architecture (forced 16kHz PCM/Opus VBR with DTX). Integrated Remote Touch & Gesture Injection via Accessibility Service (Remote Tap/Swipe). Optimized WebSocket fallback codec selection.",
+  "changelog": "- Implemented Dashboard Interface and updated MicService core functionality. Integrated Audio Playback hook and optimized WebSocket audio streaming protocol with low latency fallback.",
   "minVersionCode": 20,
   "apkAvailable": true,
-  "apkSize": 49140724,
-  "updatedAt": "2026-05-04T04:19:00.000Z"
+  "apkSize": 6149763,
+  "updatedAt": "2026-05-17T16:24:00.000Z"
 }

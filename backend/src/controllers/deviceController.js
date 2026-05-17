@@ -154,6 +154,7 @@ function handleAudioDevice(ws, req) {
                 charging: typeof json.charging === "boolean" ? json.charging : null,
                 lowNetwork: json.lowNetwork === true,
                 networkLagging: json.networkLagging === true,
+                droppingPackets: json.droppingPackets === true,
                 audioDrops: Number(json.audioDrops || dev.health?.audioDrops || 0),
                 silenceDrops: Number(json.silenceDrops || dev.health?.silenceDrops || 0),
                 frameMs: Number(json.frameMs || dev.health?.frameMs || 20),
@@ -352,7 +353,7 @@ function handleAudioDevice(ws, req) {
       const hardDropThreshold = DASHBOARD_MAX_BUFFERED_BYTES * 2;
       if (buffered > DASHBOARD_MAX_BUFFERED_BYTES) {
         client._audioBackoffLevel = Math.min((client._audioBackoffLevel || 0) + 1, 6);
-        const backoffMs = Math.min(250 * (2 ** client._audioBackoffLevel), 5000);
+        const backoffMs = Math.min(120 * (2 ** client._audioBackoffLevel), 2000);
         client._audioBackoffUntil = now + backoffMs;
         client._droppedFrames = (client._droppedFrames || 0) + 1;
         if (!client._lastDropNotifyAt || now - client._lastDropNotifyAt > 5_000) {
@@ -372,9 +373,7 @@ function handleAudioDevice(ws, req) {
             client._droppedFrames = 0;
           } catch (_e) {}
         }
-        if (buffered > hardDropThreshold) {
-          return;
-        }
+        return;
       }
 
       if ((client._audioBackoffUntil || 0) > now) {

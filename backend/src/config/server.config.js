@@ -51,7 +51,7 @@ function resolveUpdatesDir() {
 module.exports = {
   PORT: parseInt(process.env.PORT, 10) || 5050,
   NODE_ENV: process.env.NODE_ENV || "development",
-  DASHBOARD_MAX_BUFFERED_BYTES: 64 * 1024,
+  DASHBOARD_MAX_BUFFERED_BYTES: 32 * 1024,
   HEARTBEAT_INTERVAL_MS: 15_000,
   SELF_PING_INTERVAL_MS: 14 * 60 * 1000,
   WS_AUTH_TOKEN: process.env.WS_AUTH_TOKEN || null,

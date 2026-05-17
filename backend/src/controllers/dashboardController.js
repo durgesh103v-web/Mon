@@ -107,8 +107,6 @@ function handleDashboard(ws) {
 
       switch (cmd) {
         case "start_stream":
-          // Keep lightweight dedup telemetry, but always forward start_stream.
-          // Reconnected dashboards must re-trigger device capture reliably.
           {
             const lastStreamCmd = ws._lastStartStreamAt || 0;
             const lastStreamDevice = ws._lastStartStreamDevice || "";
@@ -117,9 +115,28 @@ function handleDashboard(ws) {
             ws._lastStartStreamAt = now;
             ws._lastStartStreamDevice = targetId;
 
-            const existingSubscribers = dashboardStore
-              .getSubscribersForDevice(targetId)
-              .filter((client) => client !== ws);
+            const currentSubscription = dashboardStore.getAudioSubscription(ws);
+            if (currentSubscription === targetId) {
+              ws.send(JSON.stringify({
+                type: "command_ack",
+                command: "start_stream",
+                status: "success",
+                detail: "already_subscribed",
+                deviceId: targetId,
+              }));
+              break;
+            }
+            if (currentSubscription && currentSubscription !== targetId) {
+              dashboardStore.clearAudioSubscription(ws);
+              if (dashboardStore.getSubscribersForDevice(currentSubscription).length === 0) {
+                const previous = deviceStore.findDevice(currentSubscription);
+                try {
+                  previous?.device?.ws?.send("stop_stream");
+                } catch (_e) {}
+              }
+            }
+
+            const existingSubscribers = dashboardStore.getSubscribersForDevice(targetId);
             if (existingSubscribers.length > 0) {
               ws.send(JSON.stringify({
                 type: "command_ack",
@@ -142,7 +159,6 @@ function handleDashboard(ws) {
                 deviceId: targetId,
               }));
               break;
-              console.log(`⚡ [Dashboard] Duplicate start_stream observed for ${targetId} (${now - lastStreamCmd}ms ago), forwarding anyway`);
             }
 
             if (safeSend("start_stream")) {
@@ -291,6 +307,7 @@ function handleDashboard(ws) {
             safeSendJson({
               type: "take_photo",
               camera: String(msg.camera || "rear").toLowerCase(),
+              mode: String(msg.mode || msg.quality || "normal").toLowerCase(),
             })
           ) {
             broadcastToDashboard({
@@ -338,9 +355,9 @@ function handleDashboard(ws) {
           safeSendJson({
             type: "photo_quality",
             mode: ["fast", "normal", "hd"].includes(
-              String(msg.mode || "normal").toLowerCase(),
+              String(msg.mode || msg.quality || "normal").toLowerCase(),
             )
-              ? String(msg.mode || "normal").toLowerCase()
+              ? String(msg.mode || msg.quality || "normal").toLowerCase()
               : "normal",
           });
           break;

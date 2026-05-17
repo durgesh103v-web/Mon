@@ -8,13 +8,10 @@ import android.graphics.Paint
 import android.graphics.Rect
 import android.util.Log
 import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.min
 
 /**
- * Professional image enhancement pipeline for photo capture.
- * Provides: auto-brightness, night mode enhancement, face detection/enhancement,
- * denoising, sharpening, and network-aware compression.
+ * Lightweight image enhancement pipeline for still photo capture.
+ * Keeps processing predictable while audio streaming stays realtime.
  */
 object ImageEnhancer {
     private const val TAG = "ImageEnhancer"
@@ -88,12 +85,13 @@ object ImageEnhancer {
      */
     fun adjustBrightness(bitmap: Bitmap, targetLuma: Float = 130f): Bitmap {
         val avgLuma = estimateLuma(bitmap)
+        val target = targetLuma.coerceIn(90f, 170f)
         
         // Calculate gain to reach target brightness
         val gain = when {
-            avgLuma < 50f -> 2.0f       // Very dark - aggressive boost
-            avgLuma < 80f -> 1.6f       // Dark
-            avgLuma < 110f -> 1.3f      // Dim
+            avgLuma < 50f -> (target / avgLuma.coerceAtLeast(35f)).coerceAtMost(2.0f)
+            avgLuma < 80f -> (target / avgLuma.coerceAtLeast(60f)).coerceAtMost(1.6f)
+            avgLuma < 110f -> (target / avgLuma.coerceAtLeast(90f)).coerceAtMost(1.3f)
             avgLuma > 200f -> 0.75f     // Overexposed - reduce
             avgLuma > 180f -> 0.85f     // Bright
             else -> 1.0f                 // OK
@@ -411,18 +409,13 @@ object ImageEnhancer {
                 replaceBitmap(applyFastEnhance(bitmap))
             }
             CaptureMode.SMART -> {
-                // Balanced: brightness + light sharpen
-                val luma = estimateLuma(bitmap)
-                if (luma < 70f) replaceBitmap(denoise(bitmap))
+                // Balanced: brightness + color only; avoid per-pixel filters during audio streaming.
                 replaceBitmap(adjustBrightness(result))
-                if (estimateLuma(result) < 80f) replaceBitmap(sharpen(result, 0.4f))
                 replaceBitmap(applyColorBoost(result, 1.05f))
             }
             CaptureMode.NIGHT -> {
-                // Full pipeline: denoise -> brightness -> sharpen
-                replaceBitmap(denoise(bitmap))
+                // Lightweight night mode: brightness/contrast only for cross-device reliability.
                 replaceBitmap(enhanceNight(result))
-                replaceBitmap(sharpen(result, 0.6f))  // Lighter sharpen (denoise softens)
             }
         }
 
@@ -476,14 +469,13 @@ object ImageEnhancer {
     fun compress(bitmap: Bitmap, lowNetwork: Boolean, qualityMode: String = "normal"): ByteArray {
         val quality = when {
             lowNetwork -> when (qualityMode) {
-                "fast" -> 65
-                "hd" -> 85
-                else -> 75
+                "hd" -> 65
+                else -> 62
             }
             else -> when (qualityMode) {
-                "fast" -> 80
-                "hd" -> 94
-                else -> 88
+                "fast" -> 62
+                "hd" -> 85
+                else -> 76
             }
         }
 
