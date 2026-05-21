@@ -10,7 +10,6 @@ const fs = require("fs");
 const path = require("path");
 const {
   PORT,
-  RECORDINGS_DIR,
   PHOTOS_DIR,
   UPDATES_DIR,
   SELF_PING_INTERVAL_MS,
@@ -33,7 +32,6 @@ function ensureDir(dirPath) {
 }
 
 function createApp() {
-  ensureDir(RECORDINGS_DIR);
   ensureDir(PHOTOS_DIR);
   ensureDir(UPDATES_DIR);
 

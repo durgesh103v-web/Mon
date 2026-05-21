@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 
 export const DeviceFleetList = memo(function DeviceFleetList({
   devices,
@@ -7,6 +7,8 @@ export const DeviceFleetList = memo(function DeviceFleetList({
   onCommand,
   pendingCommands = {},
 }) {
+  const visibleDevices = useMemo(() => devices.slice(0, 12), [devices]);
+
   if (devices.length === 0) return null;
 
   return (
@@ -17,7 +19,7 @@ export const DeviceFleetList = memo(function DeviceFleetList({
         display: 'grid', gap: 12,
         gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
       }}>
-        {devices.map(device => {
+        {visibleDevices.map(device => {
           const isSelected = selectedDeviceId === device.deviceId;
           const health = device.health || {};
           const isOffline = health.wsConnected === false;
@@ -35,10 +37,8 @@ export const DeviceFleetList = memo(function DeviceFleetList({
                   ? 'linear-gradient(140deg, rgba(14,165,233,0.12), rgba(34,197,94,0.08))'
                   : 'rgba(15,15,20,0.6)',
                 border: `1px solid ${isSelected ? 'rgba(34,211,238,0.35)' : 'rgba(63,63,70,0.3)'}`,
-                boxShadow: isSelected ? '0 0 18px rgba(34,211,238,0.1)' : '0 4px 12px rgba(0,0,0,0.2)',
-                transition: 'all 0.25s ease',
+                boxShadow: isSelected ? '0 0 0 1px rgba(34,211,238,0.16)' : 'none',
                 opacity: isOffline ? 0.7 : 1,
-                filter: isOffline ? 'grayscale(0.2)' : 'none',
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -83,7 +83,7 @@ export const DeviceFleetList = memo(function DeviceFleetList({
                       fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em',
                       background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)',
                       color: '#f59e0b', cursor: isWaking ? 'not-allowed' : 'pointer',
-                      transition: 'all 0.15s', opacity: isWaking ? 0.6 : 1,
+                      opacity: isWaking ? 0.6 : 1,
                     }}
                   >
                     {isWaking ? '⚡ Waking...' : '⚡ Force Wake'}

@@ -3,8 +3,8 @@
  *
  * Scalability note:
  * - Audio frames are heavy; we do NOT broadcast every device's audio to every dashboard.
- * - Each dashboard client maintains an "active audio subscription" (one deviceId) and
- *   the backend routes audio frames only to subscribed clients.
+ * - Each dashboard client can subscribe to one or more device streams.
+ *   The backend routes audio frames only to clients subscribed to that device.
  */
 
 const WebSocket = require("ws");
@@ -12,7 +12,7 @@ const WebSocket = require("ws");
 /** @type {Set<any>} */
 const dashboardClients = new Set();
 
-// ws -> deviceId (active audio subscription)
+// ws -> Set<deviceId> (audio subscriptions)
 const audioSubscriptionByClient = new Map();
 
 function addClient(ws) {
@@ -38,7 +38,26 @@ function setAudioSubscription(ws, deviceId) {
     audioSubscriptionByClient.delete(ws);
     return;
   }
-  audioSubscriptionByClient.set(ws, String(deviceId));
+  audioSubscriptionByClient.set(ws, new Set([String(deviceId)]));
+}
+
+function addAudioSubscription(ws, deviceId) {
+  if (!ws || !deviceId) return;
+  const set = audioSubscriptionByClient.get(ws) || new Set();
+  set.add(String(deviceId));
+  audioSubscriptionByClient.set(ws, set);
+}
+
+function removeAudioSubscription(ws, deviceId) {
+  if (!ws) return;
+  if (!deviceId) {
+    audioSubscriptionByClient.delete(ws);
+    return;
+  }
+  const set = audioSubscriptionByClient.get(ws);
+  if (!set) return;
+  set.delete(String(deviceId));
+  if (set.size === 0) audioSubscriptionByClient.delete(ws);
 }
 
 function clearAudioSubscription(ws) {
@@ -47,7 +66,19 @@ function clearAudioSubscription(ws) {
 }
 
 function getAudioSubscription(ws) {
-  return audioSubscriptionByClient.get(ws) || null;
+  const set = audioSubscriptionByClient.get(ws);
+  if (!set || set.size === 0) return null;
+  return Array.from(set)[0] || null;
+}
+
+function getAudioSubscriptions(ws) {
+  const set = audioSubscriptionByClient.get(ws);
+  return set ? Array.from(set) : [];
+}
+
+function isClientSubscribedToDevice(ws, deviceId) {
+  if (!ws || !deviceId) return false;
+  return audioSubscriptionByClient.get(ws)?.has(String(deviceId)) === true;
 }
 
 function forEachClientSubscribedToDevice(deviceId, callback) {
@@ -56,7 +87,7 @@ function forEachClientSubscribedToDevice(deviceId, callback) {
   dashboardClients.forEach((client) => {
     if (!client || client.readyState !== WebSocket.OPEN) return;
     const sub = audioSubscriptionByClient.get(client);
-    if (sub === want) callback(client);
+    if (sub?.has(want)) callback(client);
   });
 }
 
@@ -66,7 +97,7 @@ function getSubscribersForDevice(deviceId) {
   const want = String(deviceId);
   dashboardClients.forEach((client) => {
     if (!client || client.readyState !== WebSocket.OPEN) return;
-    if (audioSubscriptionByClient.get(client) === want) subscribers.push(client);
+    if (audioSubscriptionByClient.get(client)?.has(want)) subscribers.push(client);
   });
   return subscribers;
 }
@@ -78,8 +109,12 @@ module.exports = {
   forEachClient,
   dashboardClients,
   setAudioSubscription,
+  addAudioSubscription,
+  removeAudioSubscription,
   clearAudioSubscription,
   getAudioSubscription,
+  getAudioSubscriptions,
+  isClientSubscribedToDevice,
   forEachClientSubscribedToDevice,
   getSubscribersForDevice,
 };

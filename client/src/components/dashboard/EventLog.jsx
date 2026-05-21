@@ -1,4 +1,4 @@
-import { useEffect, useRef, memo } from 'react';
+import { memo, useMemo } from 'react';
 
 const getEventStyle = event => {
   if (event.includes('success') || event.includes('ok') || event.includes('streaming') || event.includes('connected'))
@@ -17,15 +17,7 @@ const getEventStyle = event => {
 };
 
 export const EventLog = memo(function EventLog({ events }) {
-  const listRef = useRef(null);
-  const displayEvents = events.length > 0 ? events : [];
-
-  // Auto-scroll to latest
-  useEffect(() => {
-    if (listRef.current) {
-      listRef.current.scrollTop = listRef.current.scrollHeight;
-    }
-  }, [events.length]);
+  const displayEvents = useMemo(() => events.slice(0, 20), [events]);
 
   const getTimestamp = () => {
     const now = new Date();
@@ -56,7 +48,6 @@ export const EventLog = memo(function EventLog({ events }) {
 
       {/* Log entries */}
       <div
-        ref={listRef}
         style={{
           padding: 12, maxHeight: 200, overflowY: 'auto',
           display: 'flex', flexDirection: 'column', gap: 2,
@@ -77,7 +68,6 @@ export const EventLog = memo(function EventLog({ events }) {
                 fontSize: 10, fontFamily: "'IBM Plex Mono', monospace",
                 background: isLast ? style.glow : 'transparent',
                 borderLeft: isLast ? `2px solid ${style.color}` : '2px solid transparent',
-                transition: 'background 0.2s',
               }}>
                 <span style={{ color: '#3f3f46', flexShrink: 0, fontSize: 9, marginTop: 1, width: 48, display: 'inline-block' }}>
                   {getTimestamp()}

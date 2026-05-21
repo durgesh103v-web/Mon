@@ -3,7 +3,7 @@ const path = require("path");
 const multer = require("multer");
 const apiController = require("../controllers/apiController");
 const { optionalAuth } = require("../middleware/auth");
-const { PHOTOS_DIR, RECORDINGS_DIR } = require("../config");
+const { PHOTOS_DIR } = require("../config");
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -26,21 +26,6 @@ const upload = multer({
   }
 });
 
-const recordingStorage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, RECORDINGS_DIR);
-  },
-  filename: function (req, file, cb) {
-    const safeName = path.basename(file.originalname || file.filename || "recording.m4a");
-    cb(null, safeName);
-  }
-});
-
-const uploadRecording = multer({
-  storage: recordingStorage,
-  limits: { fileSize: 200 * 1024 * 1024 },
-});
-
 const router = express.Router();
 
 router.get("/devices", optionalAuth, apiController.listDevices);
@@ -57,8 +42,5 @@ router.get("/heartbeat", optionalAuth, apiController.heartbeat);
 // Commands & Photos
 router.post("/devices/:deviceId/command", optionalAuth, apiController.sendCommand);
 router.post("/upload-photo", optionalAuth, upload.single("photo"), apiController.uploadPhoto);
-router.post("/upload-recording", optionalAuth, uploadRecording.single("recording"), apiController.uploadRecording);
-router.get("/recordings", optionalAuth, apiController.listRecordings);
-router.delete("/recordings/:filename", optionalAuth, apiController.deleteRecording);
 
 module.exports = router;

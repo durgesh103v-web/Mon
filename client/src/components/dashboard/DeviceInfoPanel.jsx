@@ -15,7 +15,7 @@ function MetricCard({ label, value, color = 'default', glow = false }) {
     <div style={{
       display: 'flex', flexDirection: 'column', gap: 4, padding: '10px 12px', borderRadius: 12,
       background: c.bg, border: `1px solid ${c.border}`,
-      boxShadow: glow ? `0 0 14px ${c.glow}` : 'none',
+      boxShadow: 'none',
     }}>
       <span style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, color: '#52525b' }}>
         {label}
@@ -48,12 +48,12 @@ function Waveform({ data, isPlaying }) {
     const centerY = height / 2;
     ctx.clearRect(0, 0, width, height);
 
-    const numBars = 48;
+    const numBars = 32;
     const barWidth = width / numBars;
 
     if (!data || data.length === 0) {
       for (let i = 0; i < numBars; i++) {
-        const idle = isPlaying ? 2 + Math.random() * 6 : 2;
+        const idle = isPlaying ? 4 : 2;
         ctx.fillStyle = 'rgba(99,102,241,0.12)';
         ctx.beginPath();
         ctx.roundRect(i * barWidth + 1, centerY - idle / 2, barWidth - 2, idle, 2);
@@ -80,8 +80,7 @@ function Waveform({ data, isPlaying }) {
       const normalized = rms / maxAmp;
       const center = numBars / 2;
       const eqMultiplier = 1 - Math.pow((i - center) / center, 2) * 0.4;
-      const jitter = 0.85 + Math.random() * 0.3;
-      let barHeight = normalized * height * 0.85 * eqMultiplier * jitter;
+      let barHeight = normalized * height * 0.85 * eqMultiplier;
       barHeight = Math.max(3, Math.min(barHeight, height * 0.92));
 
       const intensity = normalized;
@@ -105,7 +104,7 @@ function Waveform({ data, isPlaying }) {
       position: 'relative', height: 64, borderRadius: 12, overflow: 'hidden',
       background: 'rgba(6,8,18,0.5)',
       border: '1px solid rgba(99,102,241,0.1)',
-      boxShadow: 'inset 0 0 20px rgba(0,0,0,0.3)',
+      boxShadow: 'none',
     }}>
       <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
       {isPlaying && (
@@ -190,10 +189,13 @@ export const DeviceInfoPanel = memo(function DeviceInfoPanel({ device, audioStat
           marginBottom: 14,
         }}>
           <MetricCard label="WebSocket" value={health.wsConnected ? 'Connected' : 'Disconnected'} color={health.wsConnected ? 'green' : 'red'} glow={health.wsConnected} />
+          <MetricCard label="Dashboard" value={health.dashboardConnected ? 'Online' : 'Offline'} color={health.dashboardConnected ? 'green' : 'red'} />
           <MetricCard label="Mic Capture" value={health.micCapturing ? 'Running' : 'Stopped'} color={health.micCapturing ? 'green' : 'red'} />
+          <MetricCard label="Camera Capture" value={health.cameraCapturing ? 'Running' : 'Stopped'} color={health.cameraCapturing ? 'green' : 'default'} />
           <MetricCard label="Conn Quality" value={health.connQuality || '—'} color={qualityColor} />
           <MetricCard label="Network" value={health.internetOnline ? `Online${health.netType ? ` · ${health.netType.toUpperCase()}` : ''}` : 'Offline'} color={health.internetOnline ? 'green' : 'red'} />
           <MetricCard label="Voice Profile" value={health.voiceProfile ? health.voiceProfile.charAt(0).toUpperCase() + health.voiceProfile.slice(1) : '—'} color={health.voiceProfile === 'far' ? 'yellow' : health.voiceProfile === 'near' ? 'blue' : 'default'} />
+          <MetricCard label="Call Capture" value={`${health.callCaptureMode || 'mic'}${health.earpieceBoost && health.earpieceBoost !== 'off' ? ` ${health.earpieceBoost}` : ''}`} color={health.callCaptureMode === 'earpiece' ? 'yellow' : health.callCaptureMode === 'speaker' ? 'green' : 'default'} />
           <MetricCard label="Stream Codec" value={health.streamCodec ? `${health.streamCodec.toUpperCase()} ${health.streamCodecMode || ''}` : '—'} color="violet" />
           <MetricCard label="Battery" value={health.batteryPct != null ? `${health.batteryPct}%${health.charging ? ' ⚡' : ''}` : '—'} color={health.batteryPct != null && health.batteryPct < 20 ? 'red' : health.batteryPct != null && health.batteryPct > 60 ? 'green' : 'yellow'} />
           <MetricCard label="Audio Latency" value={audioState?.latencyMs ? `${audioState.latencyMs}ms` : '—'} color={audioState?.latencyMs && audioState.latencyMs > 500 ? 'yellow' : 'default'} />

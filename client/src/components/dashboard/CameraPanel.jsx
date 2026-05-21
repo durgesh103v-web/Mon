@@ -130,13 +130,23 @@ export const CameraPanel = memo(function CameraPanel({
   const captureStatus = statusFor('take_photo');
   const screenshotStatus = statusFor('take_screenshot');
   const disabledAll = !isConnected || !deviceId;
-  const uploadStatus = isPhotoPending || isScreenshotPending
-    ? `${lastCaptureType || 'Capture'} uploading`
+  const imageStatus = health?.imageUploadStatus || 'idle';
+  const uploadStatus = health?.uploadPausedForAudio
+    ? 'Upload Paused for Audio'
+    : health?.imageUploading || imageStatus === 'uploading'
+      ? 'Uploading'
+    : health?.imageQueued || imageStatus === 'queued'
+      ? 'Image Queued'
+    : imageStatus === 'uploaded' || captureStatus === 'sent' || screenshotStatus === 'sent'
+      ? 'Uploaded'
+    : isPhotoPending || isScreenshotPending
+      ? `${lastCaptureType || 'Capture'} queued`
     : captureStatus === 'sent' || screenshotStatus === 'sent'
       ? `${lastCaptureType || 'Capture'} requested`
     : disabledAll
       ? 'Offline'
       : 'Ready';
+  const audioLive = health?.micCapturing === true;
 
   const handleCapture = useCallback((camera) => {
     if (disabledAll || isPhotoPending || isScreenshotPending) return;
@@ -215,6 +225,10 @@ export const CameraPanel = memo(function CameraPanel({
         </div>
 
         <div className="camera-toggle-row">
+          <div className={`upload-status-card ${audioLive ? 'is-on' : ''}`}>
+            <span>Audio Live</span>
+            <strong>{audioLive ? 'Live' : 'Idle'}</strong>
+          </div>
           <div className={`upload-status-card ${nightMode !== 'off' ? 'is-on' : ''}`}>
             <span>Night Mode</span>
             <strong>{NIGHT_OPTIONS.find(item => item.value === nightMode)?.label || 'Off'}</strong>
@@ -222,6 +236,10 @@ export const CameraPanel = memo(function CameraPanel({
           <div className="upload-status-card">
             <span>Upload Status</span>
             <strong>{uploadStatus}</strong>
+          </div>
+          <div className={`upload-status-card ${health?.imageQueued ? 'is-on' : ''}`}>
+            <span>Image Queue</span>
+            <strong>{health?.imageQueueDepth ? `${health.imageQueueDepth} queued` : 'Clear'}</strong>
           </div>
         </div>
       </div>

@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 
 function formatDuration(seconds) {
   if (!seconds) return '';
@@ -15,6 +15,8 @@ const CALL_META = {
 };
 
 export const CallsPanel = memo(function CallsPanel({ calls }) {
+  const visibleCalls = useMemo(() => calls.slice(0, 40), [calls]);
+
   return (
     <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
       {/* Header */}
@@ -38,16 +40,13 @@ export const CallsPanel = memo(function CallsPanel({ calls }) {
         </div>
       ) : (
         <div style={{ maxHeight: 280, overflowY: 'auto' }}>
-          {calls.map(call => {
+          {visibleCalls.map(call => {
             const meta = CALL_META[call.type] || { icon: '📞', color: '#71717a', bg: 'rgba(82,82,91,0.12)', border: 'rgba(82,82,91,0.25)' };
             return (
               <div key={call.id} style={{
                 display: 'flex', alignItems: 'center', gap: 10,
                 padding: '8px 14px', borderBottom: '1px solid rgba(63,63,70,0.2)',
-                transition: 'background 0.15s',
               }}
-              onMouseEnter={e => e.currentTarget.style.background = 'rgba(63,63,70,0.1)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
               >
                 <span style={{ fontSize: 16, flexShrink: 0 }}>{meta.icon}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>

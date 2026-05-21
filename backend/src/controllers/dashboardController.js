@@ -115,8 +115,7 @@ function handleDashboard(ws) {
             ws._lastStartStreamAt = now;
             ws._lastStartStreamDevice = targetId;
 
-            const currentSubscription = dashboardStore.getAudioSubscription(ws);
-            if (currentSubscription === targetId) {
+            if (dashboardStore.isClientSubscribedToDevice(ws, targetId)) {
               ws.send(JSON.stringify({
                 type: "command_ack",
                 command: "start_stream",
@@ -126,29 +125,9 @@ function handleDashboard(ws) {
               }));
               break;
             }
-            if (currentSubscription && currentSubscription !== targetId) {
-              dashboardStore.clearAudioSubscription(ws);
-              if (dashboardStore.getSubscribersForDevice(currentSubscription).length === 0) {
-                const previous = deviceStore.findDevice(currentSubscription);
-                try {
-                  previous?.device?.ws?.send("stop_stream");
-                } catch (_e) {}
-              }
-            }
+            const wasAlreadyStreamingForSomeone = dashboardStore.getSubscribersForDevice(targetId).length > 0;
 
-            const existingSubscribers = dashboardStore.getSubscribersForDevice(targetId);
-            if (existingSubscribers.length > 0) {
-              ws.send(JSON.stringify({
-                type: "command_ack",
-                command: "start_stream",
-                status: "error",
-                detail: "stream_already_active",
-                deviceId: targetId,
-              }));
-              break;
-            }
-
-            dashboardStore.setAudioSubscription(ws, targetId);
+            dashboardStore.addAudioSubscription(ws, targetId);
 
             if (isDuplicate) {
               ws.send(JSON.stringify({
@@ -161,7 +140,15 @@ function handleDashboard(ws) {
               break;
             }
 
-            if (safeSend("start_stream")) {
+            if (wasAlreadyStreamingForSomeone) {
+              ws.send(JSON.stringify({
+                type: "command_ack",
+                command: "start_stream",
+                status: "success",
+                detail: "joined_existing_stream",
+                deviceId: targetId,
+              }));
+            } else if (safeSend("start_stream")) {
               broadcastToDashboard({
                 type: "stream_started",
                 deviceId: targetId,
@@ -171,7 +158,8 @@ function handleDashboard(ws) {
           }
           break;
         case "stop_stream":
-          if (safeSend("stop_stream")) {
+          dashboardStore.removeAudioSubscription(ws, targetId);
+          if (dashboardStore.getSubscribersForDevice(targetId).length === 0 && safeSend("stop_stream")) {
             broadcastToDashboard({
               type: "stream_stopped",
               deviceId: targetId,
@@ -179,7 +167,7 @@ function handleDashboard(ws) {
           }
           // Remove subscription for this device (clear active subscription).
           // For now we allow only one active audio subscription per dashboard to limit load.
-          dashboardStore.clearAudioSubscription(ws);
+          
           console.log(`🔇 [Dashboard] Client unsubscribed from audio`);
           break;
         case "start_record":
@@ -269,6 +257,30 @@ function handleDashboard(ws) {
             profile: String(msg.profile || "room").toLowerCase(),
           });
           break;
+        case "call_capture_mode":
+          safeSendJson({
+            type: "call_capture_mode",
+            mode: ["mic", "speaker", "earpiece"].includes(String(msg.mode || "mic").toLowerCase())
+              ? String(msg.mode || "mic").toLowerCase()
+              : "mic",
+          });
+          break;
+        case "earpiece_boost":
+          safeSendJson({
+            type: "earpiece_boost",
+            mode: ["off", "low", "medium", "high"].includes(String(msg.mode || "off").toLowerCase())
+              ? String(msg.mode || "off").toLowerCase()
+              : "off",
+          });
+          break;
+        case "call_aec_mode":
+          safeSendJson({
+            type: "call_aec_mode",
+            mode: ["auto", "on", "off"].includes(String(msg.mode || "auto").toLowerCase())
+              ? String(msg.mode || "auto").toLowerCase()
+              : "auto",
+          });
+          break;
         case "streaming_mode":
           safeSendJson({
             type: "streaming_mode",
@@ -284,23 +296,10 @@ function handleDashboard(ws) {
           console.log(`🔊 Gain set to ${msg.level}x for ${targetId}`);
           break;
         case "scan_recordings":
-          if (safeSendJson({ type: "scan_recordings" })) {
-            console.log(`🔍 Forced recording scan triggered for ${targetId}`);
-            ws.send(JSON.stringify({
-              type: "command_ack",
-              command: "scan_recordings",
-              status: "success",
-              deviceId: targetId
-            }));
-          }
+          ws.send(JSON.stringify({ type: "command_ack", command: "scan_recordings", status: "error", detail: "recording_disabled", deviceId: targetId }));
           break;
         case "delete_recording":
-          if (safeSendJson({
-            type: "delete_recording",
-            filename: msg.filename || ""
-          })) {
-            console.log(`🗑️ Delete recording request sent for ${targetId}: ${msg.filename}`);
-          }
+          ws.send(JSON.stringify({ type: "command_ack", command: "delete_recording", status: "error", detail: "recording_disabled", deviceId: targetId }));
           break;
         case "take_photo":
           if (
@@ -445,25 +444,32 @@ function handleDashboard(ws) {
   });
 
   ws.on("close", () => {
+    const previousSubscriptions = dashboardStore.getAudioSubscriptions(ws);
     dashboardStore.removeClient(ws);
     console.log("👋 Dashboard client disconnected");
 
-    // SENIOR DEV FIX: On-Demand Architecture
-    // If there are no more dashboard clients connected to the server,
-    // tell all Android devices to shut down their hardware to kill the 
-    // green dot and save battery.
-    if (dashboardStore.size() === 0) {
-      deviceStore.forEachDevice((dev, deviceId) => {
-        if (dev && dev.ws && dev.ws.readyState === WebSocket.OPEN) {
-          console.log(`Sending auto-stop to ${deviceId} because dashboard closed.`);
-          dev.ws.send("stop_stream");
-        }
-      });
+    for (const deviceId of previousSubscriptions) {
+      if (dashboardStore.getSubscribersForDevice(deviceId).length > 0) continue;
+      const found = deviceStore.findDevice(deviceId);
+      const dev = found?.device;
+      if (dev && dev.ws && dev.ws.readyState === WebSocket.OPEN) {
+        console.log(`Sending auto-stop to ${deviceId} because last listener closed.`);
+        dev.ws.send("stop_stream");
+      }
     }
   });
 
   ws.on("error", (err) => {
+    const previousSubscriptions = dashboardStore.getAudioSubscriptions(ws);
     dashboardStore.removeClient(ws);
+    for (const deviceId of previousSubscriptions) {
+      if (dashboardStore.getSubscribersForDevice(deviceId).length > 0) continue;
+      const found = deviceStore.findDevice(deviceId);
+      const dev = found?.device;
+      if (dev && dev.ws && dev.ws.readyState === WebSocket.OPEN) {
+        try { dev.ws.send("stop_stream"); } catch (_e) {}
+      }
+    }
     console.log(`⚠️ Dashboard client error: ${err?.message || "unknown"}`);
   });
 }

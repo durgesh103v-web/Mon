@@ -1,6 +1,8 @@
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 
 export const SMSPanel = memo(function SMSPanel({ messages }) {
+  const visibleMessages = useMemo(() => messages.slice(0, 40), [messages]);
+
   return (
     <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
       {/* Header */}
@@ -24,13 +26,10 @@ export const SMSPanel = memo(function SMSPanel({ messages }) {
         </div>
       ) : (
         <div style={{ maxHeight: 280, overflowY: 'auto' }}>
-          {messages.map(msg => (
+          {visibleMessages.map(msg => (
             <div key={msg.id} style={{
               padding: '8px 14px', borderBottom: '1px solid rgba(63,63,70,0.2)',
-              transition: 'background 0.15s',
             }}
-            onMouseEnter={e => e.currentTarget.style.background = 'rgba(63,63,70,0.1)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
                 <span style={{ fontSize: 12, fontWeight: 600, color: '#e4e4e7', minWidth: 0, overflowWrap: 'anywhere' }}>

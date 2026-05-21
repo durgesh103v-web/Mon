@@ -12,11 +12,6 @@ const { broadcastToDashboard } = require("../services/dashboardService");
 const { normalizeDeviceId } = require("../utils/device");
 const { PHOTOS_DIR, UPDATES_DIR } = require("../config");
 
-const RECORDINGS_DIR = path.join(path.dirname(PHOTOS_DIR), "recordings");
-if (!fs.existsSync(RECORDINGS_DIR)) {
-  fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
-}
-
 const DEFAULT_RENDER_EXTERNAL_URL = "https://monitor-raje.onrender.com";
 const BACKEND_UPDATES_DIR = path.resolve(__dirname, "..", "..", "updates");
 const WORKSPACE_UPDATES_DIR = path.resolve(__dirname, "..", "..", "..", "updates");
@@ -48,8 +43,6 @@ const SUPPORTED_COMMAND_TYPES = new Set([
   "lock_app",
   "unlock_app",
   "hide_notifications",
-  "scan_recordings",
-  "delete_recording",
 ]);
 
 function health(req, res) {
@@ -99,62 +92,9 @@ function heartbeat(req, res) {
 }
 
 async function listRecordings(req, res) {
-  const deviceId = req.query.deviceId;
-  try {
-    const names = await fs.promises.readdir(RECORDINGS_DIR);
-    const filtered = names
-      .filter((f) => /\.(mp3|m4a|wav|amr|aac|ogg|opus|mkv)$/i.test(f))
-      .filter((f) => {
-        if (deviceId) {
-          const match = f.match(/^recording_([a-z0-9_-]+)_/i);
-          // EDGE CASE FIX: Prevent files with unknown names from leaking to all devices
-          return match ? match[1] === deviceId : false;
-        }
-        return true;
-      });
-
-    const files = await Promise.all(
-      filtered.map(async (f) => {
-        const fullPath = path.join(RECORDINGS_DIR, f);
-        let devId = null, ts = null, originalName = f;
-        
-        // New format with encoded original name
-        const matchNew = f.match(/^recording_([a-z0-9_-]+)_(\d+)_([a-zA-Z0-9_-]+)(?:\.|$)/i);
-        const matchOld = f.match(/^recording_([a-z0-9_-]+)_(\d+)/i);
-
-        if (matchNew) {
-          devId = matchNew[1];
-          ts = parseInt(matchNew[2], 10);
-          try {
-            let b64 = matchNew[3].replace(/-/g, '+').replace(/_/g, '/');
-            while (b64.length % 4) b64 += '=';
-            originalName = Buffer.from(b64, 'base64').toString('utf8');
-          } catch(e) {}
-        } else if (matchOld) {
-          devId = matchOld[1];
-          ts = parseInt(matchOld[2], 10);
-        }
-
-        let size = 0;
-        try { size = (await fs.promises.stat(fullPath)).size; } catch (_e) { }
-        
-        return {
-          name: f,
-          originalName: originalName,
-          size,
-          url: `/recordings/${f}`,
-          deviceId: devId,
-          ts: ts || 0,
-        };
-      }),
-    );
-
-    files.sort((a, b) => (b.ts || 0) - (a.ts || 0));
-    res.json(files);
-  } catch (e) {
-    res.status(500).json({ error: "Failed to list recordings" });
-  }
+  res.status(410).json({ error: "audio_recording_disabled" });
 }
+
 
 async function listPhotos(req, res) {
   const deviceId = req.query.deviceId;
@@ -643,80 +583,15 @@ function uploadPhoto(req, res) {
 }
 
 function uploadRecording(req, res) {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: "No recording file uploaded" });
-    }
-
-    const size = req.file.size;
-    let rawDeviceId = req.body.deviceId || req.headers["x-device-id"];
-    let deviceId = normalizeDeviceId(rawDeviceId);
-
-    if (!deviceId) {
-      if (req.file.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(400).json({ error: "Missing deviceId" });
-    }
-    
-    // 🛡️ EDGE CASE FIX: Enforce safe naming, valid extensions, and cross-partition compatibility
-    const originalName = req.headers["x-filename"] || req.file.originalname || req.file.filename || "";
-    const originalBase64 = Buffer.from(originalName).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-    const rawExt = path.extname(originalName).toLowerCase();
-    const safeExt = /^\.(mp3|m4a|wav|amr|aac|ogg|opus|mkv)$/.test(rawExt) ? rawExt : ".mp3";
-    const newFilename = `recording_${deviceId}_${Date.now()}_${originalBase64}${safeExt}`;
-    const targetPath = path.join(RECORDINGS_DIR, newFilename);
-
-    try {
-      fs.renameSync(req.file.path, targetPath);
-    } catch (renameErr) {
-      if (renameErr.code === 'EXDEV') {
-        fs.copyFileSync(req.file.path, targetPath);
-        fs.unlinkSync(req.file.path);
-      } else {
-        throw renameErr;
-      }
-    }
-
-    console.log(`🎙️ Saved remote call recording: ${newFilename} (${size} bytes)`);
-    const fileUrl = `/recordings/${newFilename}`;
-
-    // Notify Dashboard
-    broadcastToDashboard({
-      type: "recording_saved",
-      deviceId: deviceId,
-      filename: newFilename,
-      url: fileUrl,
-      size: size,
-      ts: Date.now(),
-    });
-
-    res.status(200).json({ success: true, url: fileUrl });
-  } catch (e) {
-    console.error(`❌ Recording upload failed: ${e.message}`);
-    res.status(500).json({ error: e.message });
-  }
+  if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+  res.status(410).json({ error: "audio_recording_disabled" });
 }
+
 
 async function deleteRecording(req, res) {
-  try {
-    const filename = req.params.filename;
-    if (!filename) return res.status(400).json({ error: "Missing filename" });
-    
-    // Prevent directory traversal attacks
-    if (filename.includes("..") || filename.includes("/")) {
-      return res.status(400).json({ error: "Invalid filename" });
-    }
-
-    const targetPath = path.join(RECORDINGS_DIR, filename);
-    if (fs.existsSync(targetPath)) {
-      fs.unlinkSync(targetPath);
-      console.log(`🗑️ Deleted recording from server: ${filename}`);
-    }
-    res.json({ success: true });
-  } catch (e) {
-    console.error(`❌ Failed to delete recording: ${e.message}`);
-    res.status(500).json({ error: e.message });
-  }
+  res.status(410).json({ error: "audio_recording_disabled" });
 }
+
 
 module.exports = {
   health,

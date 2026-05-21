@@ -54,7 +54,7 @@ export function useAudioPlayback() {
   const workletNodeRef = useRef(null);
   const workletQueueSamplesRef = useRef(0);
   const usingWorkletRef = useRef(false);
-  const waveformRef = useRef(new Float32Array(128));
+  const waveformRef = useRef(new Float32Array(32));
   const lastDeviceIdRef = useRef(null);
   const targetDeviceIdRef = useRef(null);
   const streamStartAtRef = useRef(0);
@@ -199,7 +199,7 @@ export function useAudioPlayback() {
 
               this.frameCount++;
               if (this.frameCount % 8 === 0) {
-                const waveform = new Array(128).fill(0);
+                const waveform = new Array(32).fill(0);
                 const step = Math.max(1, Math.floor(out.length / waveform.length));
                 for (let i = 0; i < waveform.length; i++) {
                   let sum = 0;
@@ -239,7 +239,7 @@ export function useAudioPlayback() {
             for (let i = 0; i < len; i++) waveform[i] = Number(msg.waveform[i]) || 0;
           }
           const now = Date.now();
-          if (now - lastStateUpdateRef.current >= 150) {
+          if (now - lastStateUpdateRef.current >= 250) {
             lastStateUpdateRef.current = now;
             const totalSamples = workletQueueSamplesRef.current;
             const lagging = totalSamples > SAMPLE_RATE * 0.16;
@@ -296,7 +296,7 @@ export function useAudioPlayback() {
       }
 
       const now = Date.now();
-      if (now - lastStateUpdateRef.current >= 150) {
+      if (now - lastStateUpdateRef.current >= 250) {
         lastStateUpdateRef.current = now;
         const capSamples = SAMPLE_RATE * 0.12;
         const totalSamples = queue.reduce((acc, c) => acc + c.length, 0);

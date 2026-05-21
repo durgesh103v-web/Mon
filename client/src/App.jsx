@@ -28,34 +28,49 @@ function App() {
     setSelectedDeviceId, sendCommand, reconnectNow,
   } = useDashboard(handleAudioData);
 
-  const [isListening, setIsListening] = useState(false);
-  const isListeningRef = useRef(false);
+  const [listeningDeviceIds, setListeningDeviceIds] = useState(() => new Set());
+  const listeningDeviceIdsRef = useRef(new Set());
   const sendCommandRef = useRef(sendCommand);
   sendCommandRef.current = sendCommand;
 
   const handleCommand = useCallback((cmd, extra) => {
+    const targetId = selectedDeviceId;
     if (cmd === 'start_stream') {
       audioPlaybackRef.current.start();
-      setIsListening(true);
-      isListeningRef.current = true;
+      if (targetId) {
+        listeningDeviceIdsRef.current = new Set([...listeningDeviceIdsRef.current, targetId]);
+        setListeningDeviceIds(new Set(listeningDeviceIdsRef.current));
+        audioPlaybackRef.current.setTargetDevice(targetId);
+      }
     } else if (cmd === 'stop_stream') {
-      audioPlaybackRef.current.stop();
-      setIsListening(false);
-      isListeningRef.current = false;
+      if (targetId) {
+        const next = new Set(listeningDeviceIdsRef.current);
+        next.delete(targetId);
+        listeningDeviceIdsRef.current = next;
+        setListeningDeviceIds(new Set(next));
+        if (next.size === 0) {
+          audioPlaybackRef.current.stop();
+        }
+      }
     }
     sendCommandRef.current(cmd, extra);
-  }, []);
+  }, [selectedDeviceId]);
 
   // Ensure audio playback is running while listening
   useEffect(() => {
-    if (isListening && !audioPlaybackRef.current.state.isPlaying) {
+    if (listeningDeviceIds.size > 0 && !audioPlaybackRef.current.state.isPlaying) {
       audioPlaybackRef.current.start();
     }
-  }, [isListening]);
+  }, [listeningDeviceIds]);
 
   useEffect(() => {
-    audioPlaybackRef.current.setTargetDevice(selectedDeviceId || null);
-  }, [selectedDeviceId]);
+    if (selectedDeviceId && listeningDeviceIdsRef.current.has(selectedDeviceId)) {
+      audioPlaybackRef.current.setTargetDevice(selectedDeviceId);
+      return;
+    }
+    const firstListeningDeviceId = Array.from(listeningDeviceIdsRef.current)[0] || null;
+    audioPlaybackRef.current.setTargetDevice(firstListeningDeviceId);
+  }, [selectedDeviceId, listeningDeviceIds]);
 
   // Auto-resend subscriptions on reconnect
   const wsResubscribedRef = useRef(false);
@@ -63,19 +78,21 @@ function App() {
     if (wsState === 'open') {
       if (wsResubscribedRef.current) return;
       wsResubscribedRef.current = true;
-      if (isListeningRef.current && selectedDeviceId) {
+      const subscribedIds = Array.from(listeningDeviceIdsRef.current);
+      if (subscribedIds.length > 0) {
         const timer = setTimeout(() => {
-          sendCommandRef.current('start_stream');
+          subscribedIds.forEach(deviceId => sendCommandRef.current('start_stream', { deviceId }));
         }, 300);
         return () => clearTimeout(timer);
       }
     } else {
       wsResubscribedRef.current = false;
     }
-  }, [wsState, selectedDeviceId]);
+  }, [wsState]);
 
   const isConnected = wsState === 'open';
-  const isStreaming = isListening || audioPlayback.state.isPlaying;
+  const isSelectedListening = selectedDeviceId ? listeningDeviceIds.has(selectedDeviceId) : false;
+  const isAnyStreaming = listeningDeviceIds.size > 0 || audioPlayback.state.isPlaying;
   const health = selectedDevice?.health;
   const selectedDeviceLabel = selectedDevice?.model || 'Unknown device';
   const selectedDeviceShortId = selectedDevice?.deviceId ? selectedDevice.deviceId.slice(0, 8) : null;
@@ -117,7 +134,7 @@ function App() {
                   fontWeight: 900, fontSize: 16, color: '#000', background: '#fff',
                   border: '2px solid #3f3f46',
                 }}>M</div>
-                {isStreaming && (
+                {isAnyStreaming && (
                   <span style={{
                     position: 'absolute', top: -4, right: -4,
                     width: 10, height: 10, borderRadius: '50%',
@@ -139,7 +156,7 @@ function App() {
             {/* Center stats */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }} className="hidden md:flex">
               <StatPill icon="📱" label="Devices" value={String(devices.length)} color={devices.length > 0 ? '#10b981' : '#52525b'} />
-              <StatPill icon="🎙" label="Audio" value={isStreaming ? 'LIVE' : 'IDLE'} color={isStreaming ? '#10b981' : '#52525b'} pulse={isStreaming} />
+              <StatPill icon="🎙" label="Audio" value={isAnyStreaming ? 'LIVE' : 'IDLE'} color={isAnyStreaming ? '#10b981' : '#52525b'} pulse={isAnyStreaming} />
               <StatPill icon="📶" label="Net" value={health?.lowNetwork ? 'LOW' : 'HQ'} color={health?.lowNetwork ? '#f59e0b' : '#818cf8'} />
               <StatPill icon="🔋" label="Batt" value={health?.batteryPct != null ? `${health.batteryPct}%` : '—'} color={health?.batteryPct != null && health.batteryPct < 20 ? '#ef4444' : '#52525b'} />
             </div>
@@ -180,14 +197,14 @@ function App() {
         <div style={{ padding: '10px 20px 0' }} className="md:hidden">
           <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, maxWidth: 1440, margin: '0 auto' }}>
             <StatPill icon="📱" label="Devices" value={String(devices.length)} color={devices.length > 0 ? '#10b981' : '#52525b'} />
-            <StatPill icon="🎙" label="Audio" value={isStreaming ? 'LIVE' : 'IDLE'} color={isStreaming ? '#10b981' : '#52525b'} pulse={isStreaming} />
+            <StatPill icon="🎙" label="Audio" value={isAnyStreaming ? 'LIVE' : 'IDLE'} color={isAnyStreaming ? '#10b981' : '#52525b'} pulse={isAnyStreaming} />
             <StatPill icon="📶" label="Net" value={health?.lowNetwork ? 'LOW' : 'HQ'} color={health?.lowNetwork ? '#f59e0b' : '#818cf8'} />
             <StatPill icon="🔋" label="Batt" value={health?.batteryPct != null ? `${health.batteryPct}%` : '—'} color={health?.batteryPct != null && health.batteryPct < 20 ? '#ef4444' : '#52525b'} />
           </div>
         </div>
 
         {/* ─── LIVE AUDIO INDICATOR ──────────────────────────────── */}
-        {isStreaming && (
+        {isAnyStreaming && (
           <div style={{
             padding: '6px 20px', background: 'rgba(16,185,129,0.06)',
             borderBottom: '1px solid rgba(16,185,129,0.15)',
@@ -231,7 +248,7 @@ function App() {
                   <StatusTag label="WS" value={health?.wsConnected === false ? 'Offline' : 'Online'} tone={health?.wsConnected === false ? 'bad' : 'good'} />
                   <StatusTag label="Net" value={health?.internetOnline === false ? 'Down' : 'Up'} tone={health?.internetOnline === false ? 'bad' : 'good'} />
                   <StatusTag label="Mic" value={health?.micCapturing ? 'Active' : 'Idle'} tone={health?.micCapturing ? 'good' : 'neutral'} />
-                  <StatusTag label="Cam" value="Photo" tone="neutral" />
+                  <StatusTag label="Cam" value={health?.cameraCapturing ? 'Active' : 'Idle'} tone={health?.cameraCapturing ? 'good' : 'neutral'} />
                 </div>
               </div>
             </div>
@@ -276,11 +293,11 @@ function App() {
               <>
                 <div className="dashboard-layout">
                   <div className="dashboard-left">
-                    <DeviceInfoPanel device={selectedDevice} audioState={audioPlayback.state} />
+                    <DeviceInfoPanel device={selectedDevice} audioState={isSelectedListening ? audioPlayback.state : { ...audioPlayback.state, isPlaying: false }} />
                     <ControlButtons
                       onCommand={handleCommand}
                       health={selectedDevice?.health}
-                      isStreaming={isStreaming}
+                      isStreaming={isSelectedListening}
                       isConnected={isConnected}
                       deviceId={selectedDeviceId}
                       pendingCommands={pendingCommands}

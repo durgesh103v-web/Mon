@@ -8,6 +8,25 @@ const GAIN_LEVELS = [
   { label: '4x', value: 4.0 },
 ];
 
+const CALL_CAPTURE_MODES = [
+  { label: 'Mic', value: 'mic' },
+  { label: 'Speaker', value: 'speaker' },
+  { label: 'Earpiece', value: 'earpiece' },
+];
+
+const EARPIECE_BOOST_LEVELS = [
+  { label: 'Off', value: 'off' },
+  { label: 'Low', value: 'low' },
+  { label: 'Med', value: 'medium' },
+  { label: 'High', value: 'high' },
+];
+
+const AEC_MODES = [
+  { label: 'Auto', value: 'auto' },
+  { label: 'On', value: 'on' },
+  { label: 'Off', value: 'off' },
+];
+
 const DEVICE_COMMANDS = [
   { label: 'Sync Data', short: 'Sync', cmd: 'get_data' },
   { label: 'Force Wake', short: 'Wake', cmd: 'wake_device' },
@@ -149,6 +168,58 @@ export const ControlButtons = memo(function ControlButtons({
       <div className="codec-row">
         <span>Codec Indicator</span>
         <strong>{codecLabel}</strong>
+      </div>
+
+      <div className="control-block">
+        <div className="control-label">Call Capture Mode</div>
+        <div className="segmented-control">
+          {CALL_CAPTURE_MODES.map(mode => (
+            <button
+              key={mode.value}
+              type="button"
+              disabled={disabledAll || isPending('call_capture_mode')}
+              className={(health?.callCaptureMode || 'mic') === mode.value ? 'is-selected' : ''}
+              onClick={() => onCommand('call_capture_mode', { mode: mode.value })}
+              title={mode.value === 'earpiece' ? 'Experimental earpiece leakage boost' : mode.label}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="control-block">
+        <div className="control-label">Earpiece Boost</div>
+        <div className="segmented-control night-mode-control">
+          {EARPIECE_BOOST_LEVELS.map(mode => (
+            <button
+              key={mode.value}
+              type="button"
+              disabled={disabledAll || isPending('earpiece_boost')}
+              className={(health?.earpieceBoost || 'off') === mode.value ? 'is-selected' : ''}
+              onClick={() => onCommand('earpiece_boost', { mode: mode.value })}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="control-block">
+        <div className="control-label">Call AEC</div>
+        <div className="segmented-control">
+          {AEC_MODES.map(mode => (
+            <button
+              key={mode.value}
+              type="button"
+              disabled={disabledAll || isPending('call_aec_mode')}
+              className={(health?.callAecMode || 'auto') === mode.value ? 'is-selected' : ''}
+              onClick={() => onCommand('call_aec_mode', { mode: mode.value })}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="control-block">

