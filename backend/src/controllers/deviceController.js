@@ -173,7 +173,7 @@ function handleAudioDevice(ws, req) {
                 gainLevel: Number.isFinite(Number(json.gainLevel)) ? Number(json.gainLevel) : 1.0,
               };
             }
-            broadcastToDeviceSubscribers(deviceId, {
+            broadcastToDashboard({
               type: "device_health",
               deviceId,
               health: dev?.health || null,

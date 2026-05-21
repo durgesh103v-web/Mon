@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiUrl, wsUrlForControl } from '../lib/helpers';
 
-const PHOTO_LIMIT = 50;
+const PHOTO_LIMIT = 36;
+const FEED_LIMIT = 40;
 
 const photoIdentity = photo => String(photo?.id || photo?.filename || photo?.url || '');
 
@@ -63,9 +64,17 @@ export function useDashboard(onAudioData) {
   const lastWsMessageAtRef = useRef(0);
   const pendingTimersRef = useRef({});
   const toastTimersRef = useRef({});
+  const feedDedupeRef = useRef({ message: '', ts: 0 });
   const selectedDevice = useMemo(() => devices.find(device => device.deviceId === selectedDeviceId) ?? null, [devices, selectedDeviceId]);
   const addFeed = useCallback(message => {
-    setFeed(prev => [message, ...prev].slice(0, 80));
+    const now = Date.now();
+    const last = feedDedupeRef.current;
+    if (last.message === message && now - last.ts < 2500) return;
+    feedDedupeRef.current = { message, ts: now };
+    setFeed(prev => {
+      if (prev[0] === message) return prev;
+      return [message, ...prev].slice(0, FEED_LIMIT);
+    });
   }, []);
   const pushToast = useCallback((type, message, deviceId) => {
     const id = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
@@ -117,23 +126,26 @@ export function useDashboard(onAudioData) {
       });
       return;
     }
-    setPendingCommands(prev => ({
-      ...prev,
-      [key]: {
-        status,
-        ts: Date.now()
-      }
-    }));
-    if (status === 'error') {
+    const ts = Date.now();
+    setPendingCommands(prev => {
+      if (prev[key]?.status === status) return prev;
+      return {
+        ...prev,
+        [key]: { status, ts }
+      };
+    });
+    if (status === 'error' || status === 'sent' || status === 'queued' || status === 'sending') {
+      const ttl = status === 'error' ? 3000 : status === 'sent' ? 1800 : 12000;
       timers[key] = window.setTimeout(() => {
         setPendingCommands(prev => {
           if (!prev[key]) return prev;
+          if (prev[key].ts !== ts) return prev;
           const next = { ...prev };
           delete next[key];
           return next;
         });
         delete timers[key];
-      }, 3000);
+      }, ttl);
     }
   }, []);
   const mergeDeviceList = useCallback(incoming => {
@@ -243,10 +255,7 @@ export function useDashboard(onAudioData) {
           deviceId: targetId,
           ...extra
         }));
-        addFeed(`Routed ${cmd} to ${targetId} via control_ws`);
-        if (cmd !== 'take_photo' && cmd !== 'take_screenshot') {
-          setCommandStatus(targetId, cmd, 'sent');
-        }
+        setCommandStatus(targetId, cmd, 'sent');
         return;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -284,10 +293,8 @@ export function useDashboard(onAudioData) {
       if (!res.ok) {
         throw new Error(result.error || result.message || `HTTP ${res.status}`);
       }
-      addFeed(`Routed ${cmd} to ${targetId} via ${result.status || 'ok'}`);
-      if (cmd !== 'take_photo' && cmd !== 'take_screenshot') {
-        setCommandStatus(targetId, cmd, 'sent');
-      }
+      addFeed(`Sent ${cmd} to ${targetId}`);
+      setCommandStatus(targetId, cmd, 'sent');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       addFeed(`Failed to send ${cmd}: ${message}`);
@@ -515,6 +522,9 @@ export function useDashboard(onAudioData) {
               timestamp: new Date(Number(msg.ts || Date.now())).toISOString()
             };
             setPhotos(prev => mergePhotoList([photo], prev));
+            if (msg.deviceId) {
+              setCommandStatus(String(msg.deviceId), photo.camera === 'screenshot' ? 'take_screenshot' : 'take_photo', null);
+            }
             addFeed(`Photo saved: ${photo.filename}`);
             return;
           }
@@ -665,7 +675,7 @@ export function useDashboard(onAudioData) {
       }
     };
     loadHealth();
-    const id = window.setInterval(loadHealth, 15000);
+    const id = window.setInterval(loadHealth, 30000);
     return () => {
       stopped = true;
       clearInterval(id);
@@ -675,7 +685,7 @@ export function useDashboard(onAudioData) {
   useEffect(() => {
     let stopped = false;
     const loadDevices = async () => {
-      if (wsState === 'open' && Date.now() - lastWsMessageAtRef.current < 20000) return;
+      if (wsState === 'open' && Date.now() - lastWsMessageAtRef.current < 30000) return;
       try {
         const res = await fetch(apiUrl('/api/devices'));
         if (!res.ok) return;
@@ -694,7 +704,7 @@ export function useDashboard(onAudioData) {
       }
     };
     loadDevices();
-    const id = window.setInterval(loadDevices, 15000);
+    const id = window.setInterval(loadDevices, 30000);
     return () => {
       stopped = true;
       clearInterval(id);

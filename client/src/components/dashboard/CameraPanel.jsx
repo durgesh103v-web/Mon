@@ -109,6 +109,8 @@ export const CameraPanel = memo(function CameraPanel({
   const [photoQuality, setPhotoQuality] = useState(health?.photoQuality || 'normal');
   const [nightMode, setNightMode] = useState(health?.photoNight || 'off');
   const [lastCaptureType, setLastCaptureType] = useState(null);
+  const visiblePhotos = useMemo(() => photos.slice(0, 24), [photos]);
+  const selectedPhotoId = selectedPhoto?.id || null;
 
   const statusFor = useCallback((cmd) => {
     if (!deviceId) return null;
@@ -125,9 +127,13 @@ export const CameraPanel = memo(function CameraPanel({
     return s === 'sending' || s === 'queued';
   }, [statusFor]);
 
+  const captureStatus = statusFor('take_photo');
+  const screenshotStatus = statusFor('take_screenshot');
   const disabledAll = !isConnected || !deviceId;
   const uploadStatus = isPhotoPending || isScreenshotPending
     ? `${lastCaptureType || 'Capture'} uploading`
+    : captureStatus === 'sent' || screenshotStatus === 'sent'
+      ? `${lastCaptureType || 'Capture'} requested`
     : disabledAll
       ? 'Offline'
       : 'Ready';
@@ -231,11 +237,11 @@ export const CameraPanel = memo(function CameraPanel({
 
         {photos.length > 0 ? (
           <div className="photo-grid">
-            {photos.slice(0, 24).map(photo => (
+            {visiblePhotos.map(photo => (
               <PhotoCard
                 key={photo.id}
                 photo={photo}
-                active={selectedPhoto?.id === photo.id}
+                active={selectedPhotoId === photo.id}
                 onClick={() => setSelectedPhoto(photo)}
               />
             ))}

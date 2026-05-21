@@ -15,21 +15,8 @@ function App() {
   // Stable refs to avoid re-render loops when these objects change
   const audioPlaybackRef = useRef(audioPlayback);
   audioPlaybackRef.current = audioPlayback;
-  const [now, setNow] = useState(new Date());
 
   // Live clock — update every second
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(t);
-  }, []);
-
-  const formatTime = d => d.toLocaleTimeString('en-US', {
-    hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit',
-  });
-  const formatDate = d => d.toLocaleDateString('en-US', {
-    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
-  });
-
   // CRITICAL: Empty dependency arrays to prevent WebSocket reconnect floods.
   const handleAudioData = useCallback((data, deviceId) => {
     audioPlaybackRef.current.feedAudio(data, deviceId);
@@ -92,11 +79,19 @@ function App() {
   const health = selectedDevice?.health;
   const selectedDeviceLabel = selectedDevice?.model || 'Unknown device';
   const selectedDeviceShortId = selectedDevice?.deviceId ? selectedDevice.deviceId.slice(0, 8) : null;
-  const reconnectIn = wsReconnectAt ? Math.max(0, Math.ceil((wsReconnectAt - now.getTime()) / 1000)) : null;
   const lockCommand = health?.networkLocked ? 'unlock_network' : 'lock_network';
   const lockStatus = selectedDeviceId ? pendingCommands[`${selectedDeviceId}:${lockCommand}`]?.status : null;
   const lockPending = lockStatus === 'sending' || lockStatus === 'queued';
   const lockDisabled = lockPending || !isConnected || !selectedDeviceId;
+  const refreshStatus = selectedDeviceId ? pendingCommands[`${selectedDeviceId}:get_data`]?.status : null;
+  const refreshPending = refreshStatus === 'sending' || refreshStatus === 'queued';
+
+  const handleRefresh = useCallback(() => {
+    reconnectNow();
+    if (selectedDeviceId) {
+      sendCommandRef.current('get_data');
+    }
+  }, [reconnectNow, selectedDeviceId]);
 
   return (
     <div style={{ position: 'relative', minHeight: '100vh', overflow: 'hidden', color: '#f4f4f5', background: '#09090b', fontFamily: "'Inter', sans-serif" }}>
@@ -151,18 +146,35 @@ function App() {
 
             {/* Right — clock + WS */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ textAlign: 'right' }} className="hidden sm:block">
-                <div style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, color: '#fff', letterSpacing: '0.08em' }}>
-                  {formatTime(now)}
-                </div>
-                <div style={{ fontSize: 9, color: '#52525b' }}>{formatDate(now)}</div>
-              </div>
+              <button
+                type="button"
+                onClick={handleRefresh}
+                disabled={refreshPending}
+                title="Refresh dashboard data"
+                style={{
+                  minHeight: 30,
+                  padding: '0 12px',
+                  borderRadius: 8,
+                  border: '1px solid rgba(63,63,70,0.55)',
+                  background: refreshPending ? 'rgba(34,211,238,0.12)' : 'rgba(24,24,27,0.74)',
+                  color: refreshPending ? '#67e8f9' : '#d4d4d8',
+                  cursor: refreshPending ? 'not-allowed' : 'pointer',
+                  fontSize: 10,
+                  fontWeight: 800,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  opacity: refreshPending ? 0.72 : 1,
+                }}
+              >
+                {refreshPending ? 'Refreshing' : 'Refresh'}
+              </button>
+              <ClockBlock />
               <WsStatusBadge state={wsState} isColdStarting={isColdStarting} />
             </div>
           </div>
         </header>
 
-        <NetworkBanner state={wsState} isColdStarting={isColdStarting} retryIn={reconnectIn} onRetry={reconnectNow} />
+        <NetworkBanner state={wsState} isColdStarting={isColdStarting} retryAt={wsReconnectAt} onRetry={reconnectNow} />
 
         {/* Mobile stats strip */}
         <div style={{ padding: '10px 20px 0' }} className="md:hidden">
@@ -342,6 +354,26 @@ const StatPill = memo(function StatPill({ icon, label, value, color, pulse = fal
   );
 });
 
+const ClockBlock = memo(function ClockBlock() {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  return (
+    <div style={{ textAlign: 'right' }} className="hidden sm:block">
+      <div style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, color: '#fff', letterSpacing: '0.08em' }}>
+        {now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+      </div>
+      <div style={{ fontSize: 9, color: '#52525b' }}>
+        {now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+      </div>
+    </div>
+  );
+});
+
 function WsStatusBadge({ state, isColdStarting }) {
   const isWaking = isColdStarting && state === 'connecting';
   const config = {
@@ -392,13 +424,22 @@ function StatusTag({ label, value, tone }) {
   );
 }
 
-function NetworkBanner({ state, isColdStarting, retryIn, onRetry }) {
+function NetworkBanner({ state, isColdStarting, retryAt, onRetry }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (state === 'open') return undefined;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [state]);
+
   if (state === 'open') return null;
   const isConnecting = state === 'connecting';
   const accent = isConnecting ? '#f59e0b' : '#ef4444';
   const bg = isConnecting ? 'rgba(245,158,11,0.06)' : 'rgba(239,68,68,0.06)';
   const border = isConnecting ? 'rgba(245,158,11,0.2)' : 'rgba(239,68,68,0.2)';
   const label = isConnecting ? (isColdStarting ? 'Waking server' : 'Reconnecting') : 'Connection lost';
+  const retryIn = retryAt ? Math.max(0, Math.ceil((retryAt - now) / 1000)) : null;
   const detail = retryIn != null ? `Retrying in ${retryIn}s` : 'Retrying soon';
 
   return (

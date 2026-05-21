@@ -58,6 +58,7 @@ export function useAudioPlayback() {
   const lastDeviceIdRef = useRef(null);
   const targetDeviceIdRef = useRef(null);
   const streamStartAtRef = useRef(0);
+  const lowNetworkRef = useRef(false);
   // S-M5 fix: Use ref for volume to avoid stale closure in initAudioContext
   const volumeRef = useRef(1.0);
   // S-M1 fix: Throttle setState to ~10Hz instead of every audio frame
@@ -197,7 +198,7 @@ export function useAudioPlayback() {
               }
 
               this.frameCount++;
-              if (this.frameCount % 6 === 0) {
+              if (this.frameCount % 8 === 0) {
                 const waveform = new Array(128).fill(0);
                 const step = Math.max(1, Math.floor(out.length / waveform.length));
                 for (let i = 0; i < waveform.length; i++) {
@@ -238,7 +239,7 @@ export function useAudioPlayback() {
             for (let i = 0; i < len; i++) waveform[i] = Number(msg.waveform[i]) || 0;
           }
           const now = Date.now();
-          if (now - lastStateUpdateRef.current >= 100) {
+          if (now - lastStateUpdateRef.current >= 150) {
             lastStateUpdateRef.current = now;
             const totalSamples = workletQueueSamplesRef.current;
             const lagging = totalSamples > SAMPLE_RATE * 0.16;
@@ -295,7 +296,7 @@ export function useAudioPlayback() {
       }
 
       const now = Date.now();
-      if (now - lastStateUpdateRef.current >= 100) {
+      if (now - lastStateUpdateRef.current >= 150) {
         lastStateUpdateRef.current = now;
         const capSamples = SAMPLE_RATE * 0.12;
         const totalSamples = queue.reduce((acc, c) => acc + c.length, 0);
@@ -337,6 +338,7 @@ export function useAudioPlayback() {
     isPlayingRef.current = false;
     audioQueueRef.current = [];
     workletQueueSamplesRef.current = 0;
+    lowNetworkRef.current = false;
     if (workletNodeRef.current) {
       workletNodeRef.current.port.postMessage({ type: 'clear' });
     }
@@ -368,10 +370,11 @@ export function useAudioPlayback() {
     if (!parsed) return;
     
     lastDeviceIdRef.current = parsed.deviceId;
-    setState(prev => {
-      const lowNetwork = parsed.codec === 'mulaw8k';
-      return prev.lowNetwork === lowNetwork ? prev : { ...prev, lowNetwork };
-    });
+    const lowNetwork = parsed.codec === 'mulaw8k';
+    if (lowNetworkRef.current !== lowNetwork) {
+      lowNetworkRef.current = lowNetwork;
+      setState(prev => prev.lowNetwork === lowNetwork ? prev : { ...prev, lowNetwork });
+    }
     const maxSamples = SAMPLE_RATE * 0.22;
 
     if (usingWorkletRef.current && workletNodeRef.current) {
