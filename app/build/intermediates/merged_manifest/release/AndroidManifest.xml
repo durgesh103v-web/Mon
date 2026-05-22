@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.device.services.app"
-    android:versionCode="76"
-    android:versionName="1.15.8" >
+    android:versionCode="77"
+    android:versionName="1.15.9" >
 
     <uses-sdk
         android:minSdkVersion="26"

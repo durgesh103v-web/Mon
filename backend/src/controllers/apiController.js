@@ -35,6 +35,7 @@ const SUPPORTED_COMMAND_TYPES = new Set([
   "photo_ai",
   "photo_quality",
   "photo_night",
+  "system_action",
   "force_update",
   "force_reconnect",
   "grant_permissions",

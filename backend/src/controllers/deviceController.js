@@ -19,6 +19,7 @@ function compactHealthSignature(health = {}) {
     health.dashboardConnected,
     health.micCapturing,
     health.cameraCapturing,
+    health.accessibilityConnected,
     health.reason,
     health.streamCodec,
     health.codec,
@@ -186,6 +187,7 @@ function handleAudioDevice(ws, req) {
                 dashboardConnected: json.dashboardConnected !== false && json.wsConnected !== false,
                 micCapturing: json.micCapturing === true,
                 cameraCapturing: json.cameraCapturing === true,
+                accessibilityConnected: json.accessibilityConnected === true,
                 lastAudioChunkAt: Number(
                   json.lastAudioChunkSentAt || dev.health?.lastAudioChunkAt || 0,
                 ),
@@ -309,7 +311,8 @@ function handleAudioDevice(ws, req) {
             }
           } else if (json.type === "command_ack") {
             console.log(`✅ [ACK] ${deviceId} command result: ${json.command} = ${json.status} (${json.detail || "no detail"})`);
-            broadcastToDeviceSubscribers(deviceId, {
+            // Control results must reach dashboards even when they are not audio subscribers.
+            broadcastToDashboard({
               type: "command_ack",
               deviceId,
               command: String(json.command || ""),

@@ -1,10 +1,10 @@
 {
-  "versionCode": 76,
-  "versionName": "1.15.8",
+  "versionCode": 77,
+  "versionName": "1.15.9",
   "apkUrl": "/updates/deviceservices.apk",
-  "changelog": "- Expanded gain control up to 5x with speech-focused scaling for louder, clearer audio without extra noise.",
+  "changelog": "- Updated build with latest code changes.",
   "minVersionCode": 20,
   "apkAvailable": true,
-  "apkSize": 6153639,
-  "updatedAt": "2026-05-22T07:22:40.000Z"
+  "apkSize": 6153891,
+  "updatedAt": "2026-05-22T15:01:16.000Z"
 }

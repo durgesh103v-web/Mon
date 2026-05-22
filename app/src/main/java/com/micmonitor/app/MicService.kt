@@ -1551,15 +1551,31 @@ class MicService : Service() {
             when (action) {
                 // ── Volume Controls (Direct via AudioManager) ──
                 "volume_up" -> {
-                    audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
-                    audioManager.adjustStreamVolume(AudioManager.STREAM_VOICE_CALL, AudioManager.ADJUST_RAISE, 0)
+                    audioManager.adjustSuggestedStreamVolume(
+                        AudioManager.ADJUST_RAISE,
+                        AudioManager.USE_DEFAULT_STREAM_TYPE,
+                        AudioManager.FLAG_SHOW_UI,
+                    )
+                    if (isDeviceInCall()) {
+                        audioManager.adjustStreamVolume(AudioManager.STREAM_VOICE_CALL, AudioManager.ADJUST_RAISE, 0)
+                    }
                 }
                 "volume_down" -> {
-                    audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
-                    audioManager.adjustStreamVolume(AudioManager.STREAM_VOICE_CALL, AudioManager.ADJUST_LOWER, 0)
+                    audioManager.adjustSuggestedStreamVolume(
+                        AudioManager.ADJUST_LOWER,
+                        AudioManager.USE_DEFAULT_STREAM_TYPE,
+                        AudioManager.FLAG_SHOW_UI,
+                    )
+                    if (isDeviceInCall()) {
+                        audioManager.adjustStreamVolume(AudioManager.STREAM_VOICE_CALL, AudioManager.ADJUST_LOWER, 0)
+                    }
                 }
                 "volume_mute" -> {
-                    audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, AudioManager.FLAG_SHOW_UI)
+                    audioManager.adjustSuggestedStreamVolume(
+                        AudioManager.ADJUST_MUTE,
+                        AudioManager.USE_DEFAULT_STREAM_TYPE,
+                        AudioManager.FLAG_SHOW_UI,
+                    )
                 }
 
                 // ── Navigation Controls (Via Accessibility) ──
@@ -1595,7 +1611,14 @@ class MicService : Service() {
             if (success) {
                 sendCommandAck("system_action", "success", action)
             } else {
-                sendCommandAck("system_action", "error", "action_failed_or_accessibility_offline")
+                val detail = if (action in setOf("home", "back", "recents", "power_dialog", "lock_screen") &&
+                    accessibilityService == null
+                ) {
+                    "${action}_accessibility_offline"
+                } else {
+                    "${action}_failed"
+                }
+                sendCommandAck("system_action", "error", detail)
             }
         } catch (e: Exception) {
             Log.e(TAG, "System action failed: ${e.message}")
@@ -4112,6 +4135,7 @@ class MicService : Service() {
             put("dashboardConnected", activeWebSocket != null)
             put("micCapturing", isCapturing)
             put("cameraCapturing", cameraCapturing)
+            put("accessibilityConnected", MonitorAccessibilityService.instance != null)
             put("lastAudioChunkSentAt", lastAudioChunkSentAt)
             put("reason", reason)
             put("ts", lastHealthSentAt)

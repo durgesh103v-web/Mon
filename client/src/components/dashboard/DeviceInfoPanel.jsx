@@ -192,6 +192,7 @@ export const DeviceInfoPanel = memo(function DeviceInfoPanel({ device, audioStat
           <MetricCard label="Dashboard" value={health.dashboardConnected ? 'Online' : 'Offline'} color={health.dashboardConnected ? 'green' : 'red'} />
           <MetricCard label="Mic Capture" value={health.micCapturing ? 'Running' : 'Stopped'} color={health.micCapturing ? 'green' : 'red'} />
           <MetricCard label="Camera Capture" value={health.cameraCapturing ? 'Running' : 'Stopped'} color={health.cameraCapturing ? 'green' : 'default'} />
+          <MetricCard label="Accessibility" value={health.accessibilityConnected ? 'Online' : 'Offline'} color={health.accessibilityConnected ? 'green' : 'red'} />
           <MetricCard label="Conn Quality" value={health.connQuality || '—'} color={qualityColor} />
           <MetricCard label="Network" value={health.internetOnline ? `Online${health.netType ? ` · ${health.netType.toUpperCase()}` : ''}` : 'Offline'} color={health.internetOnline ? 'green' : 'red'} />
           <MetricCard label="Voice Profile" value={health.voiceProfile ? health.voiceProfile.charAt(0).toUpperCase() + health.voiceProfile.slice(1) : '—'} color={health.voiceProfile === 'far' ? 'yellow' : health.voiceProfile === 'near' ? 'blue' : 'default'} />

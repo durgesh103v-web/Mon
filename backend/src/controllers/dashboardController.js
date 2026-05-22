@@ -436,9 +436,17 @@ function handleDashboard(ws) {
               ws.send(JSON.stringify({ type: "error", message: `Invalid system_action: ${action}` }));
               break;
             }
-            safeSendJson({
+            const sent = safeSendJson({
               type: "system_action",
               action,
+            });
+            broadcastToDashboard({
+              type: "command_dispatch",
+              deviceId: targetId,
+              command: "system_action",
+              detail: action,
+              status: sent ? "sent" : "queued",
+              ts: Date.now(),
             });
             console.log(`🎮 System action "${action}" sent to ${targetId}`);
           }
