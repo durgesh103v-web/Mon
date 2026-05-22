@@ -8,8 +8,8 @@ plugins {
 }
 
 // Version management - increment versionCode for each release
-val appVersionCode = 74  // Increment this for each update
-val appVersionName = "1.15.6"  // Human-readable version
+val appVersionCode = 75  // Increment this for each update
+val appVersionName = "1.15.7"  // Human-readable version
 val localProps = Properties().apply {
     val propsFile = rootProject.file("local.properties")
     if (propsFile.exists()) load(propsFile.inputStream())

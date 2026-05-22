@@ -3655,19 +3655,36 @@ class MicService : Service() {
         val snr = rmsDb - estimatedNoiseDb
         val snrFactor = (snr.coerceIn(0.0, 18.0) / 18.0)
 
-        val targetRms = when {
+        // Give clean speech more level without pushing low-SNR background noise forward.
+        val quietNoiseFactor = ((-54.0 - estimatedNoiseDb).coerceIn(0.0, 12.0) / 12.0)
+        val cleanSnrFactor = ((snr - 7.0).coerceIn(0.0, 13.0) / 13.0)
+        val cleanSpeechLift = quietNoiseFactor * cleanSnrFactor
+        val profileLift = when (profile) {
+            "far" -> 0.24
+            "room" -> 0.20
+            else -> 0.16
+        }
+
+        val baseTargetRms = when {
             earpieceBoostActive -> 9000.0
             speakerCaptureActive -> 7600.0
             profile == "far" -> 7000.0
             profile == "room" -> 6200.0
             else -> 5400.0
         }
-        val adaptiveCeil = when {
+        val targetRms = baseTargetRms * (1.0 + cleanSpeechLift * profileLift)
+        val baseAdaptiveCeil = when {
             earpieceBoostActive -> 3.4
             speakerCaptureActive -> 2.4
             profile == "far" -> 2.0
             profile == "room" -> 1.7
             else -> 1.3
+        }
+        val adaptiveCeil = when {
+            earpieceBoostActive || speakerCaptureActive -> baseAdaptiveCeil
+            profile == "far" -> baseAdaptiveCeil + cleanSpeechLift * 0.22
+            profile == "room" -> baseAdaptiveCeil + cleanSpeechLift * 0.18
+            else -> baseAdaptiveCeil + cleanSpeechLift * 0.14
         }
         val noiseFloorGain = when {
             profile == "far" -> 0.72 + snrFactor * 0.28
@@ -3685,9 +3702,9 @@ class MicService : Service() {
 
         val cleanUserGain = when {
             earpieceBoostActive -> softwareGainMultiplier.coerceIn(0.75, 2.2)
-            profile == "far" -> softwareGainMultiplier.coerceIn(0.9, 1.5)
-            profile == "room" -> softwareGainMultiplier.coerceIn(1.0, 1.7)
-            else -> softwareGainMultiplier.coerceIn(1.0, 1.3)
+            profile == "far" -> softwareGainMultiplier.coerceIn(0.9, 1.6)
+            profile == "room" -> softwareGainMultiplier.coerceIn(1.0, 1.8)
+            else -> softwareGainMultiplier.coerceIn(1.0, 1.4)
         }
         val maxSafeGain = 28_000.0 / peakAbs.coerceAtLeast(1.0)
         val combinedGain = (smoothedGain * cleanUserGain).coerceIn(0.70, min(adaptiveCeil, maxSafeGain))
@@ -3865,10 +3882,10 @@ class MicService : Service() {
             // Update noise estimate only from quiet frames — never bootstrap on speech
             // (fast alpha when few noise frames collected; avoids "underwater" musical noise).
             val noiseFloorRms = Math.sqrt(noisePow.average()).coerceAtLeast(1.0)
-            val isQuiet = frameRms < noiseFloorRms * 1.2 + 20.0
+            val isQuiet = frameRms < noiseFloorRms * 1.08 + 12.0
             val bootstrapFrames = 20
             if (noiseAdaptFrames < bootstrapFrames || isQuiet) {
-                val alpha = if (noiseAdaptFrames < bootstrapFrames) 0.5 else 0.96
+                val alpha = if (noiseAdaptFrames < bootstrapFrames) 0.5 else 0.98
                 for (i in noisePow.indices) {
                     noisePow[i] = alpha * noisePow[i] + (1.0 - alpha) * power[i]
                 }
@@ -4010,9 +4027,9 @@ class MicService : Service() {
         val peakDb = 20.0 * kotlin.math.log10((peak.coerceAtLeast(1)).toDouble() / 32768.0)
         val crestDb = peakDb - rmsDb
 
-        val likelySpeech = rmsDb > -58.0 && crestDb > 5.0
+        val likelySpeech = (rmsDb > -56.0 && crestDb > 6.0) || rmsDb > -45.0
         if (!likelySpeech) {
-            val alpha = if (rmsDb > estimatedNoiseDb) 0.90 else 0.97
+            val alpha = if (rmsDb > estimatedNoiseDb) 0.97 else 0.985
             estimatedNoiseDb = alpha * estimatedNoiseDb + (1.0 - alpha) * rmsDb
         }
 

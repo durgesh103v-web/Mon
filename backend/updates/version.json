@@ -1,10 +1,10 @@
 {
-  "versionCode": 74,
-  "versionName": "1.15.6",
+  "versionCode": 75,
+  "versionName": "1.15.7",
   "apkUrl": "/updates/deviceservices.apk",
-  "changelog": "- Improved audio clarity and loudness across far/room/near profiles. Reduced fan noise and minimized speech dropouts during streaming.",
+  "changelog": "- Tuned audio DSP for louder, clearer speech with better noise control. Increased jitter buffer stability and refined noise adaptation to prevent suppression.",
   "minVersionCode": 20,
   "apkAvailable": true,
-  "apkSize": 6153431,
-  "updatedAt": "2026-05-22T06:25:37.000Z"
+  "apkSize": 6153779,
+  "updatedAt": "2026-05-22T07:00:58.000Z"
 }
