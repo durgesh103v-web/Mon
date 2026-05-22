@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState, memo, useCallback } from 'react';
 
 const GAIN_LEVELS = [
   { label: '1x', value: 1.0 },
-  { label: '1.2x', value: 1.2 },
-  { label: '1.3x', value: 1.3 },
-  { label: '1.5x', value: 1.5 },
   { label: '2x', value: 2.0 },
+  { label: '3x', value: 3.0 },
+  { label: '4x', value: 4.0 },
+  { label: '5x', value: 5.0 },
 ];
 
 const VOICE_PROFILES = [

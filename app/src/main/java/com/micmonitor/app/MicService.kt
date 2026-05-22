@@ -3656,35 +3656,35 @@ class MicService : Service() {
         val snrFactor = (snr.coerceIn(0.0, 18.0) / 18.0)
 
         // Give clean speech more level without pushing low-SNR background noise forward.
-        val quietNoiseFactor = ((-54.0 - estimatedNoiseDb).coerceIn(0.0, 12.0) / 12.0)
-        val cleanSnrFactor = ((snr - 7.0).coerceIn(0.0, 13.0) / 13.0)
+        val quietNoiseFactor = ((-56.0 - estimatedNoiseDb).coerceIn(0.0, 14.0) / 14.0)
+        val cleanSnrFactor = ((snr - 5.0).coerceIn(0.0, 15.0) / 15.0)
         val cleanSpeechLift = quietNoiseFactor * cleanSnrFactor
         val profileLift = when (profile) {
-            "far" -> 0.24
-            "room" -> 0.20
-            else -> 0.16
+            "far" -> 0.30
+            "room" -> 0.24
+            else -> 0.20
         }
 
         val baseTargetRms = when {
-            earpieceBoostActive -> 9000.0
-            speakerCaptureActive -> 7600.0
-            profile == "far" -> 7000.0
-            profile == "room" -> 6200.0
-            else -> 5400.0
+            earpieceBoostActive -> 9600.0
+            speakerCaptureActive -> 8000.0
+            profile == "far" -> 7400.0
+            profile == "room" -> 6600.0
+            else -> 5800.0
         }
         val targetRms = baseTargetRms * (1.0 + cleanSpeechLift * profileLift)
         val baseAdaptiveCeil = when {
-            earpieceBoostActive -> 3.4
-            speakerCaptureActive -> 2.4
-            profile == "far" -> 2.0
-            profile == "room" -> 1.7
-            else -> 1.3
+            earpieceBoostActive -> 3.5
+            speakerCaptureActive -> 2.5
+            profile == "far" -> 2.1
+            profile == "room" -> 1.8
+            else -> 1.4
         }
         val adaptiveCeil = when {
             earpieceBoostActive || speakerCaptureActive -> baseAdaptiveCeil
-            profile == "far" -> baseAdaptiveCeil + cleanSpeechLift * 0.22
-            profile == "room" -> baseAdaptiveCeil + cleanSpeechLift * 0.18
-            else -> baseAdaptiveCeil + cleanSpeechLift * 0.14
+            profile == "far" -> baseAdaptiveCeil + cleanSpeechLift * 0.30
+            profile == "room" -> baseAdaptiveCeil + cleanSpeechLift * 0.24
+            else -> baseAdaptiveCeil + cleanSpeechLift * 0.18
         }
         val noiseFloorGain = when {
             profile == "far" -> 0.72 + snrFactor * 0.28
@@ -3700,12 +3700,8 @@ class MicService : Service() {
             smoothedGain * (if (profile == "far") 0.75 else 0.80) + rawGain * (if (profile == "far") 0.25 else 0.20)
         }
 
-        val cleanUserGain = when {
-            earpieceBoostActive -> softwareGainMultiplier.coerceIn(0.75, 2.2)
-            profile == "far" -> softwareGainMultiplier.coerceIn(0.9, 1.6)
-            profile == "room" -> softwareGainMultiplier.coerceIn(1.0, 1.8)
-            else -> softwareGainMultiplier.coerceIn(1.0, 1.4)
-        }
+        val userGainTarget = softwareGainMultiplier.coerceIn(1.0, 5.0)
+        val cleanUserGain = 1.0 + (userGainTarget - 1.0) * cleanSpeechLift.coerceIn(0.0, 1.0)
         val maxSafeGain = 28_000.0 / peakAbs.coerceAtLeast(1.0)
         val combinedGain = (smoothedGain * cleanUserGain).coerceIn(0.70, min(adaptiveCeil, maxSafeGain))
         for (i in 0 until samples) work[i] *= combinedGain

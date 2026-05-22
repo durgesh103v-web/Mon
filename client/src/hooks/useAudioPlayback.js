@@ -423,7 +423,7 @@ export function useAudioPlayback() {
 
   // Set volume
   const setVolume = useCallback(volume => {
-    const clamped = Math.max(0, Math.min(5, volume)); // Allow up to 5x volume from the UI
+    const clamped = Math.max(0, Math.min(7, volume)); // Allow up to 6x volume from the UI
     // S-M5 fix: Update ref so initAudioContext always has current volume
     volumeRef.current = clamped;
     if (gainNodeRef.current) {
