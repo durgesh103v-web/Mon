@@ -281,6 +281,14 @@ function handleDashboard(ws) {
               : "auto",
           });
           break;
+        case "agc_mode":
+          safeSendJson({
+            type: "agc_mode",
+            mode: ["auto", "on", "off"].includes(String(msg.mode || "auto").toLowerCase())
+              ? String(msg.mode || "auto").toLowerCase()
+              : "auto",
+          });
+          break;
         case "streaming_mode":
           safeSendJson({
             type: "streaming_mode",

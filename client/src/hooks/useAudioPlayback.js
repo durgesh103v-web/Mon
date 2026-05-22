@@ -161,7 +161,7 @@ export function useAudioPlayback() {
                   const chunk = data.chunk instanceof Float32Array ? data.chunk : new Float32Array(data.chunk);
                   this.queue.push({ chunk, offset: 0 });
                   this.totalQueued += chunk.length;
-                  const maxSamples = Number(data.maxSamples || 3520);
+                  const maxSamples = Number(data.maxSamples || 2880);
                   while (this.totalQueued > maxSamples && this.queue.length > 1) {
                     const dropped = this.queue.shift();
                     if (dropped) this.totalQueued -= (dropped.chunk.length - dropped.offset);
@@ -172,7 +172,7 @@ export function useAudioPlayback() {
 
             process(inputs, outputs) {
               const out = outputs[0][0];
-              const targetSamples = 1600; // 100ms jitter buffer
+            const targetSamples = 1600; // 100ms jitter buffer
               const minSamples = 1280; // 80ms minimum before starting/restarting
               if (!this.primed && this.totalQueued < minSamples) {
                 out.fill(0);
@@ -242,7 +242,7 @@ export function useAudioPlayback() {
           if (now - lastStateUpdateRef.current >= 250) {
             lastStateUpdateRef.current = now;
             const totalSamples = workletQueueSamplesRef.current;
-            const lagging = totalSamples > SAMPLE_RATE * 0.16;
+            const lagging = totalSamples > SAMPLE_RATE * 0.18;
             const capSamples = SAMPLE_RATE * 0.12;
             const bufferHealth = Math.min(1, totalSamples / capSamples);
             setState(prev => ({
@@ -300,7 +300,7 @@ export function useAudioPlayback() {
         lastStateUpdateRef.current = now;
         const capSamples = SAMPLE_RATE * 0.12;
         const totalSamples = queue.reduce((acc, c) => acc + c.length, 0);
-        const lagging = totalSamples > SAMPLE_RATE * 0.16;
+        const lagging = totalSamples > SAMPLE_RATE * 0.18;
         const bufferHealth = Math.min(1, totalSamples / capSamples);
         setState(prev => ({
           ...prev,
@@ -375,7 +375,7 @@ export function useAudioPlayback() {
       lowNetworkRef.current = lowNetwork;
       setState(prev => prev.lowNetwork === lowNetwork ? prev : { ...prev, lowNetwork });
     }
-    const maxSamples = SAMPLE_RATE * 0.22;
+    const maxSamples = SAMPLE_RATE * 0.18;
 
     if (usingWorkletRef.current && workletNodeRef.current) {
       const chunk = parsed.audio;

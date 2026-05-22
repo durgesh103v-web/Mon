@@ -1,10 +1,10 @@
 {
-  "versionCode": 72,
-  "versionName": "1.15.4",
+  "versionCode": 73,
+  "versionName": "1.15.5",
   "apkUrl": "/updates/deviceservices.apk",
-  "changelog": "- Implemented Dashboard Interface and updated MicService core functionality. Integrated Audio Playback hook and optimized WebSocket audio streaming protocol with low latency fallback.",
+  "changelog": "- Improved release stability and audio streaming reliability. Refined dashboard UX and background sync behavior.",
   "minVersionCode": 20,
   "apkAvailable": true,
-  "apkSize": 6150831,
-  "updatedAt": "2026-05-21T14:21:17.000Z"
+  "apkSize": 6152967,
+  "updatedAt": "2026-05-22T05:58:51.000Z"
 }

@@ -2,10 +2,16 @@ import { useEffect, useMemo, useState, memo, useCallback } from 'react';
 
 const GAIN_LEVELS = [
   { label: '1x', value: 1.0 },
+  { label: '1.2x', value: 1.2 },
+  { label: '1.3x', value: 1.3 },
   { label: '1.5x', value: 1.5 },
   { label: '2x', value: 2.0 },
-  { label: '3x', value: 3.0 },
-  { label: '4x', value: 4.0 },
+];
+
+const VOICE_PROFILES = [
+  { label: 'Normal Voice', value: 'near' },
+  { label: 'Room Voice', value: 'room' },
+  { label: 'Far Voice', value: 'far' },
 ];
 
 const CALL_CAPTURE_MODES = [
@@ -26,6 +32,8 @@ const AEC_MODES = [
   { label: 'On', value: 'on' },
   { label: 'Off', value: 'off' },
 ];
+
+const AGC_MODES = AEC_MODES;
 
 const DEVICE_COMMANDS = [
   { label: 'Sync Data', short: 'Sync', cmd: 'get_data' },
@@ -56,7 +64,6 @@ export const ControlButtons = memo(function ControlButtons({
   pendingCommands = {},
 }) {
   const [gainIndex, setGainIndex] = useState(0);
-  const [farVoice, setFarVoice] = useState(health?.voiceProfile === 'far');
 
   const statusFor = useCallback((cmd) => {
     if (!deviceId) return null;
@@ -69,10 +76,6 @@ export const ControlButtons = memo(function ControlButtons({
   }, [statusFor]);
 
   const disabledAll = !isConnected || !deviceId;
-
-  useEffect(() => {
-    setFarVoice(health?.voiceProfile === 'far');
-  }, [health?.voiceProfile]);
 
   useEffect(() => {
     const level = Number(health?.gainLevel);
@@ -93,13 +96,6 @@ export const ControlButtons = memo(function ControlButtons({
     if (!health?.streamCodec) return 'PCM16 16K';
     return `${String(health.streamCodec).toUpperCase()} ${health.streamCodecMode || ''}`.trim();
   }, [health?.streamCodec, health?.streamCodecMode]);
-
-  const toggleFarVoice = useCallback(() => {
-    if (disabledAll || isPending('voice_profile')) return;
-    const next = !farVoice;
-    setFarVoice(next);
-    onCommand('voice_profile', { profile: next ? 'far' : 'near' });
-  }, [disabledAll, farVoice, isPending, onCommand]);
 
   const toggleLowNetwork = useCallback(() => {
     if (disabledAll || isPending('set_low_network')) return;
@@ -137,11 +133,24 @@ export const ControlButtons = memo(function ControlButtons({
         </button>
       </div>
 
+      <div className="control-block">
+        <div className="control-label">Voice Profile</div>
+        <div className="segmented-control voice-profile-control">
+          {VOICE_PROFILES.map(profile => (
+            <button
+              key={profile.value}
+              type="button"
+              disabled={disabledAll || isPending('voice_profile')}
+              className={(health?.voiceProfile || 'near') === profile.value ? 'is-selected' : ''}
+              onClick={() => onCommand('voice_profile', { profile: profile.value })}
+            >
+              {profile.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="audio-toggle-grid">
-        <button type="button" className={`toggle-row ${farVoice ? 'is-on' : ''}`} onClick={toggleFarVoice} disabled={disabledAll || isPending('voice_profile')}>
-          <span>Far Voice Mode</span>
-          <strong>{farVoice ? 'On' : 'Off'}</strong>
-        </button>
         <button type="button" className={`toggle-row ${health?.lowNetwork ? 'is-on warn' : ''}`} onClick={toggleLowNetwork} disabled={disabledAll || isPending('set_low_network')}>
           <span>Low Network Mode</span>
           <strong>{health?.lowNetwork ? 'On' : 'Off'}</strong>
@@ -215,6 +224,24 @@ export const ControlButtons = memo(function ControlButtons({
               disabled={disabledAll || isPending('call_aec_mode')}
               className={(health?.callAecMode || 'auto') === mode.value ? 'is-selected' : ''}
               onClick={() => onCommand('call_aec_mode', { mode: mode.value })}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="control-block">
+        <div className="control-label">Hardware AGC</div>
+        <div className="segmented-control">
+          {AGC_MODES.map(mode => (
+            <button
+              key={mode.value}
+              type="button"
+              disabled={disabledAll || isPending('agc_mode')}
+              className={(health?.agcMode || 'auto') === mode.value ? 'is-selected' : ''}
+              onClick={() => onCommand('agc_mode', { mode: mode.value })}
+              title={mode.value === 'off' ? 'Use Off if constant fan noise pumps louder' : `AGC ${mode.label}`}
             >
               {mode.label}
             </button>

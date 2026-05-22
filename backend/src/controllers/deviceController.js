@@ -21,11 +21,14 @@ function compactHealthSignature(health = {}) {
     health.cameraCapturing,
     health.reason,
     health.streamCodec,
+    health.codec,
     health.streamCodecMode,
     health.voiceProfile,
+    health.cleanFarVoice,
     health.callCaptureMode,
     health.earpieceBoost,
     health.callAecMode,
+    health.agcMode,
     health.internetOnline,
     health.callActive,
     health.batteryPct,
@@ -34,6 +37,10 @@ function compactHealthSignature(health = {}) {
     health.lowNetworkRequested,
     health.networkLagging,
     health.droppingPackets,
+    health.noiseGateActive,
+    health.wsBufferedBytes,
+    health.audioFramesSent,
+    health.audioFramesDropped,
     health.imageUploadStatus,
     health.imageQueued,
     health.imageUploading,
@@ -187,13 +194,16 @@ function handleAudioDevice(ws, req) {
                 aiMode: json.aiMode !== false,
                 aiAuto: json.aiAuto !== false,
                 streamCodec: String(json.streamCodec || dev.health?.streamCodec || "pcm"),
+                codec: String(json.codec || json.streamCodec || dev.health?.codec || "pcm16"),
                 streamCodecMode: String(
                   json.streamCodecMode || dev.health?.streamCodecMode || "auto",
                 ),
                 voiceProfile: String(json.voiceProfile || dev.health?.voiceProfile || "near"),
+                cleanFarVoice: json.cleanFarVoice === true,
                 callCaptureMode: String(json.callCaptureMode || dev.health?.callCaptureMode || "mic"),
                 earpieceBoost: String(json.earpieceBoost || dev.health?.earpieceBoost || "off"),
                 callAecMode: String(json.callAecMode || dev.health?.callAecMode || "auto"),
+                agcMode: String(json.agcMode || dev.health?.agcMode || "auto"),
                 noiseDb: Number.isFinite(Number(json.noiseDb)) ? Number(json.noiseDb) : null,
                 internetOnline: json.internetOnline !== false,
                 callActive: json.callActive === true,
@@ -203,6 +213,10 @@ function handleAudioDevice(ws, req) {
                 lowNetworkRequested: json.lowNetworkRequested === true,
                 networkLagging: json.networkLagging === true,
                 droppingPackets: json.droppingPackets === true,
+                noiseGateActive: json.noiseGateActive === true,
+                wsBufferedBytes: Number(json.wsBufferedBytes || 0),
+                audioFramesSent: Number(json.audioFramesSent || dev.health?.audioFramesSent || 0),
+                audioFramesDropped: Number(json.audioFramesDropped || dev.health?.audioFramesDropped || 0),
                 imageUploadStatus: String(json.imageUploadStatus || dev.health?.imageUploadStatus || "idle"),
                 imageQueued: json.imageQueued === true,
                 imageUploading: json.imageUploading === true,
@@ -210,6 +224,7 @@ function handleAudioDevice(ws, req) {
                 imageQueueDepth: Number(json.imageQueueDepth || 0),
                 audioDrops: Number(json.audioDrops || dev.health?.audioDrops || 0),
                 silenceDrops: Number(json.silenceDrops || dev.health?.silenceDrops || 0),
+                silenceFramesDropped: Number(json.silenceFramesDropped || json.silenceDrops || dev.health?.silenceFramesDropped || 0),
                 frameMs: Number(json.frameMs || dev.health?.frameMs || 20),
                 photoAi: json.photoAi !== false,
                 photoQuality: String(json.photoQuality || dev.health?.photoQuality || "normal"),
@@ -438,11 +453,8 @@ function handleAudioDevice(ws, req) {
       const buffered = client.bufferedAmount || 0;
       const now = Date.now();
       if (buffered > DASHBOARD_MAX_BUFFERED_BYTES) {
-        client._audioBackoffLevel = Math.min((client._audioBackoffLevel || 0) + 1, 6);
-        const backoffMs = Math.min(120 * (2 ** client._audioBackoffLevel), 2000);
-        client._audioBackoffUntil = now + backoffMs;
         client._droppedFrames = (client._droppedFrames || 0) + 1;
-        if (!client._lastDropNotifyAt || now - client._lastDropNotifyAt > 5_000) {
+        if (!client._lastDropNotifyAt || now - client._lastDropNotifyAt > 2_000) {
           client._lastDropNotifyAt = now;
           try {
             safeSend(
@@ -463,17 +475,7 @@ function handleAudioDevice(ws, req) {
         return;
       }
 
-      if ((client._audioBackoffUntil || 0) > now) {
-        const stride = Math.max(2, 2 ** Math.max((client._audioBackoffLevel || 1) - 1, 0));
-        client._audioBackoffCounter = (client._audioBackoffCounter || 0) + 1;
-        if (client._audioBackoffCounter % stride !== 0) {
-          return;
-        }
-      } else if ((client._audioBackoffLevel || 0) > 0) {
-        client._audioBackoffLevel = Math.max(0, client._audioBackoffLevel - 1);
-      }
-
-      safeSend(client, audioFrame, DASHBOARD_MAX_BUFFERED_BYTES * 2);
+      safeSend(client, audioFrame, DASHBOARD_MAX_BUFFERED_BYTES);
     });
 
 

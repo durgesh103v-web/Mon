@@ -27,6 +27,7 @@ const SUPPORTED_COMMAND_TYPES = new Set([
   "stream_codec",
   "set_low_network",
   "voice_profile",
+  "agc_mode",
   "streaming_mode",
   "set_gain",
   "take_photo",

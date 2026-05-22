@@ -195,8 +195,13 @@ export const DeviceInfoPanel = memo(function DeviceInfoPanel({ device, audioStat
           <MetricCard label="Conn Quality" value={health.connQuality || '—'} color={qualityColor} />
           <MetricCard label="Network" value={health.internetOnline ? `Online${health.netType ? ` · ${health.netType.toUpperCase()}` : ''}` : 'Offline'} color={health.internetOnline ? 'green' : 'red'} />
           <MetricCard label="Voice Profile" value={health.voiceProfile ? health.voiceProfile.charAt(0).toUpperCase() + health.voiceProfile.slice(1) : '—'} color={health.voiceProfile === 'far' ? 'yellow' : health.voiceProfile === 'near' ? 'blue' : 'default'} />
+          <MetricCard label="Clean Far Voice" value={health.cleanFarVoice || health.voiceProfile === 'far' ? 'On' : 'Off'} color={health.cleanFarVoice || health.voiceProfile === 'far' ? 'green' : 'default'} />
+          <MetricCard label="Low Network" value={health.lowNetwork ? 'On' : 'Off'} color={health.lowNetwork ? 'yellow' : 'default'} />
+          <MetricCard label="Noise Gate" value={health.noiseGateActive ? 'Active' : 'Open'} color={health.noiseGateActive ? 'yellow' : 'green'} />
+          <MetricCard label="Dropping Old Audio" value={health.droppingPackets || audioState?.droppingPackets ? 'Yes' : 'No'} color={health.droppingPackets || audioState?.droppingPackets ? 'red' : 'default'} />
+          <MetricCard label="Hardware AGC" value={(health.agcMode || 'auto').toUpperCase()} color={health.agcMode === 'off' ? 'yellow' : 'default'} />
           <MetricCard label="Call Capture" value={`${health.callCaptureMode || 'mic'}${health.earpieceBoost && health.earpieceBoost !== 'off' ? ` ${health.earpieceBoost}` : ''}`} color={health.callCaptureMode === 'earpiece' ? 'yellow' : health.callCaptureMode === 'speaker' ? 'green' : 'default'} />
-          <MetricCard label="Stream Codec" value={health.streamCodec ? `${health.streamCodec.toUpperCase()} ${health.streamCodecMode || ''}` : '—'} color="violet" />
+          <MetricCard label="Codec" value={health.codec || (health.streamCodec ? `${health.streamCodec.toUpperCase()} ${health.streamCodecMode || ''}` : '—')} color="violet" />
           <MetricCard label="Battery" value={health.batteryPct != null ? `${health.batteryPct}%${health.charging ? ' ⚡' : ''}` : '—'} color={health.batteryPct != null && health.batteryPct < 20 ? 'red' : health.batteryPct != null && health.batteryPct > 60 ? 'green' : 'yellow'} />
           <MetricCard label="Audio Latency" value={audioState?.latencyMs ? `${audioState.latencyMs}ms` : '—'} color={audioState?.latencyMs && audioState.latencyMs > 500 ? 'yellow' : 'default'} />
           <MetricCard label="Buffer Health" value={audioState?.bufferHealth !== undefined ? `${Math.round(audioState.bufferHealth * 100)}%` : '—'} color={audioState?.bufferHealth !== undefined && audioState.bufferHealth < 0.2 ? 'red' : 'default'} />
