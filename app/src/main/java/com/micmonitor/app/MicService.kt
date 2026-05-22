@@ -196,6 +196,11 @@ class MicService : Service() {
     private fun isEffectiveLowNetworkMode(): Boolean {
         return lowNetworkMode || isNetworkLagging || (isCapturing && (imageTransferActive || imageQueueDepth > 0 || imageUploadPausedForAudio))
     }
+
+    private fun isAudioCodecConstrained(): Boolean {
+        // Avoid forcing µ-law just because a photo is queued; keep codec decisions network-driven.
+        return lowNetworkMode || isNetworkLagging || wsBufferedBytes > 24_000L
+    }
     
     // HQ Buffered Audio Mode removed (M-02) — all code uses realtime path
     @Volatile private var lastAudioChunkSentAt = 0L
@@ -3252,12 +3257,12 @@ class MicService : Service() {
                         val nowMs = System.currentTimeMillis()
                         val isFarProfile = voiceProfile == "far"
                         val rawSpeech = if (isFarProfile) {
-                            (peakAbs > 800 && rms > 100.0) || rms > 600.0
+                            (peakAbs > 650 && rms > 90.0) || rms > 480.0
                         } else {
-                            (peakAbs > 1300 && rms > 160.0) || rms > 900.0
+                            (peakAbs > 1100 && rms > 140.0) || rms > 750.0
                         }
                         speechHangoverFrames = if (rawSpeech) {
-                            if (isEffectiveLowNetworkMode()) 6 else if (voiceProfile == "far") 14 else 10
+                            if (isEffectiveLowNetworkMode()) 10 else if (voiceProfile == "far") 24 else 16
                         } else {
                             (speechHangoverFrames - 1).coerceAtLeast(0)
                         }
@@ -3543,11 +3548,11 @@ class MicService : Service() {
     * Correct order: denoise + controlled gain + limiter. Keep processing moderate
     * to avoid the distortion artifacts from overly aggressive EQ/boost stacks.
      *
-    *  Stage 1 — HPF @ 120 Hz            removes sub-bass rumble
-    *  Stage 2 — Presence EQ + high-shelf (low level — before gain)
-    *  Stage 3 — Spectral denoiser       (skipped first ~30 chunks for model warmup)
+    *  Stage 1 — HPF @ 120-260 Hz         removes sub-bass rumble
+    *  Stage 2 — Spectral denoiser        (skipped first ~30 chunks for model warmup)
+    *  Stage 3 — Presence EQ + high-shelf (low level — before gain)
     *  Stage 4 — Adaptive gain (+ user multiplier, single capped stage)
-    *  Stage 5 — Soft peak limiter       prevents digital clipping
+    *  Stage 5 — Soft peak limiter        prevents digital clipping
      *
      * Filter state (hpfPrev*, eq1*, bq*, pe*, smoothedGain) persists between
      * frames so there are no discontinuities at buffer boundaries.
@@ -3573,11 +3578,11 @@ class MicService : Service() {
 
         // DC blocker + strong rumble high-pass. Lower alpha means higher cutoff.
         val hpAlpha = when {
-            earpieceBoostActive -> 0.928  // ~190Hz
-            speakerCaptureActive -> 0.934
-            profile == "far" -> 0.924     // ~200Hz: strongest rumble cleanup
-            profile == "room" -> 0.942    // ~150Hz: balanced room cleanup
-            else -> 0.953                  // ~120Hz: keep nearby voice natural
+            earpieceBoostActive -> 0.910  // ~260Hz
+            speakerCaptureActive -> 0.918
+            profile == "far" -> 0.905     // ~280Hz: strongest rumble cleanup
+            profile == "room" -> 0.928    // ~200Hz: balanced room cleanup
+            else -> 0.948                  // ~140Hz: keep nearby voice natural
         }
         for (i in 0 until samples) {
             val x = work[i]
@@ -3589,37 +3594,16 @@ class MicService : Service() {
 
         // Gentle low-pass around speech top end. This reduces fan air/hiss without watery artifacts.
         val lpAlpha = when {
-            willBeMuLaw -> 0.56
-            profile == "far" -> 0.60
-            profile == "room" -> 0.66
-            else -> 0.74
+            willBeMuLaw -> 0.72
+            profile == "far" -> 0.78
+            profile == "room" -> 0.82
+            else -> 0.86
         }
         for (i in 0 until samples) {
             val y = lpfPrevY + lpAlpha * (work[i] - lpfPrevY)
             lpfPrevX = work[i]
             lpfPrevY = y
             work[i] = y
-        }
-
-        // Presence band: light 900Hz-3.2kHz speech lift, never bass boost.
-        val eq1b0 = 1.1356685
-        val eq1b1 = -0.9976115
-        val eq1b2 = 0.4004227
-        val eq1a1 = -0.9976115
-        val eq1a2 = 0.5360913
-        val presenceWet = when {
-            earpieceBoostActive -> 0.26
-            speakerCaptureActive -> 0.20
-            profile == "far" -> 0.26
-            profile == "room" -> 0.18
-            else -> 0.08
-        }
-        for (i in 0 until samples) {
-            val x = work[i]
-            val y = eq1b0 * x + eq1b1 * eq1X1 + eq1b2 * eq1X2 - eq1a1 * eq1Y1 - eq1a2 * eq1Y2
-            eq1X2 = eq1X1; eq1X1 = x
-            eq1Y2 = eq1Y1; eq1Y1 = y
-            work[i] = x * (1.0 - presenceWet) + y * presenceWet
         }
 
         // Moderate stationary-noise reduction. Blend some original back to avoid robotic/watery sound.
@@ -3629,13 +3613,34 @@ class MicService : Service() {
         } else {
             spectralDenoiser.denoise(work)
             val denoiseWet = when {
-                profile == "far" -> if (estimatedNoiseDb > -54.0) 0.62 else 0.48
-                profile == "room" -> if (estimatedNoiseDb > -54.0) 0.42 else 0.32
-                else -> 0.20
+                profile == "far" -> if (estimatedNoiseDb > -54.0) 0.45 else 0.35
+                profile == "room" -> if (estimatedNoiseDb > -54.0) 0.32 else 0.24
+                else -> 0.18
             }
             for (i in 0 until samples) {
                 work[i] = preDenoise[i] * (1.0 - denoiseWet) + work[i] * denoiseWet
             }
+        }
+
+        // Presence band: light 900Hz-3.2kHz speech lift, never bass boost.
+        val eq1b0 = 1.1356685
+        val eq1b1 = -0.9976115
+        val eq1b2 = 0.4004227
+        val eq1a1 = -0.9976115
+        val eq1a2 = 0.5360913
+        val presenceWet = when {
+            earpieceBoostActive -> 0.22
+            speakerCaptureActive -> 0.18
+            profile == "far" -> 0.24
+            profile == "room" -> 0.16
+            else -> 0.08
+        }
+        for (i in 0 until samples) {
+            val x = work[i]
+            val y = eq1b0 * x + eq1b1 * eq1X1 + eq1b2 * eq1X2 - eq1a1 * eq1Y1 - eq1a2 * eq1Y2
+            eq1X2 = eq1X1; eq1X1 = x
+            eq1Y2 = eq1Y1; eq1Y1 = y
+            work[i] = x * (1.0 - presenceWet) + y * presenceWet
         }
 
         var sumSq = 0.0
@@ -3651,18 +3656,18 @@ class MicService : Service() {
         val snrFactor = (snr.coerceIn(0.0, 18.0) / 18.0)
 
         val targetRms = when {
-            earpieceBoostActive -> 8000.0
-            speakerCaptureActive -> 7000.0
-            profile == "far" -> 6200.0
-            profile == "room" -> 5600.0
-            else -> 5000.0
+            earpieceBoostActive -> 9000.0
+            speakerCaptureActive -> 7600.0
+            profile == "far" -> 7000.0
+            profile == "room" -> 6200.0
+            else -> 5400.0
         }
         val adaptiveCeil = when {
-            earpieceBoostActive -> 3.2
-            speakerCaptureActive -> 2.2
-            profile == "far" -> 1.8
-            profile == "room" -> 1.5
-            else -> 1.2
+            earpieceBoostActive -> 3.4
+            speakerCaptureActive -> 2.4
+            profile == "far" -> 2.0
+            profile == "room" -> 1.7
+            else -> 1.3
         }
         val noiseFloorGain = when {
             profile == "far" -> 0.72 + snrFactor * 0.28
@@ -3671,18 +3676,18 @@ class MicService : Service() {
         }
         val rawGain = ((targetRms / rms) * noiseFloorGain).coerceIn(0.75, adaptiveCeil)
 
-        // Increase slowly for far voices; decrease quickly on loud bursts to avoid clipping/pumping.
+        // Balanced attack/release to avoid pumping and missing the start of speech.
         smoothedGain = if (rawGain > smoothedGain) {
-            smoothedGain * (if (profile == "far") 0.96 else 0.97) + rawGain * (if (profile == "far") 0.04 else 0.03)
+            smoothedGain * (if (profile == "far") 0.90 else 0.92) + rawGain * (if (profile == "far") 0.10 else 0.08)
         } else {
-            smoothedGain * (if (profile == "far") 0.55 else 0.65) + rawGain * (if (profile == "far") 0.45 else 0.35)
+            smoothedGain * (if (profile == "far") 0.75 else 0.80) + rawGain * (if (profile == "far") 0.25 else 0.20)
         }
 
         val cleanUserGain = when {
-            earpieceBoostActive -> softwareGainMultiplier.coerceIn(0.75, 2.0)
-            profile == "far" -> softwareGainMultiplier.coerceIn(0.85, 1.3)
-            profile == "room" -> softwareGainMultiplier.coerceIn(1.0, 1.5)
-            else -> softwareGainMultiplier.coerceIn(1.0, 1.2)
+            earpieceBoostActive -> softwareGainMultiplier.coerceIn(0.75, 2.2)
+            profile == "far" -> softwareGainMultiplier.coerceIn(0.9, 1.5)
+            profile == "room" -> softwareGainMultiplier.coerceIn(1.0, 1.7)
+            else -> softwareGainMultiplier.coerceIn(1.0, 1.3)
         }
         val maxSafeGain = 28_000.0 / peakAbs.coerceAtLeast(1.0)
         val combinedGain = (smoothedGain * cleanUserGain).coerceIn(0.70, min(adaptiveCeil, maxSafeGain))
@@ -3701,7 +3706,7 @@ class MicService : Service() {
 
     private fun chooseWsFallbackCodec(): Byte {
         val now = SystemClock.elapsedRealtime()
-        val constrained = isEffectiveLowNetworkMode() || wsBufferedBytes > 24_000L
+        val constrained = isAudioCodecConstrained()
         if (constrained) {
             codecLowNetworkActive = true
             codecLowNetworkUntilMs = now + 5_000L
@@ -3874,17 +3879,16 @@ class MicService : Service() {
             if (fftFramesProcessed >= 15 && noiseAdaptFrames >= 10) {
                 val strongDenoise = aiEnhancementEnabled || estimatedNoiseDb > -54.0
                 
-                // SENIOR DEV FIX: Dialed back from 3.5 to 2.8. 
-                // Suppresses heavy fans without chewing up the fragile formants of far-away voices.
-                val OVER  = if (strongDenoise) 1.75 else 1.35
+                // Softer subtraction to avoid tearing speech formants.
+                val OVER  = if (strongDenoise) 1.35 else 1.20
                 
                 // Crush the noise floor down safely
                 val adaptiveFloor = when {
-                    estimatedNoiseDb > -45.0 -> 0.05
-                    estimatedNoiseDb > -55.0 -> 0.08
-                    else -> 0.12
+                    estimatedNoiseDb > -45.0 -> 0.10
+                    estimatedNoiseDb > -55.0 -> 0.14
+                    else -> 0.18
                 }
-                val FLOOR = if (strongDenoise) adaptiveFloor else 0.18
+                val FLOOR = if (strongDenoise) adaptiveFloor else 0.22
 
                 // Step 1: Calculate raw suppression scales for all bins
                 val rawScales = DoubleArray(BINS)

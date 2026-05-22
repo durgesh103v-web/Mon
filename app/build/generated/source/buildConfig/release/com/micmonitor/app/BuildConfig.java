@@ -8,9 +8,9 @@ public final class BuildConfig {
   public static final String APPLICATION_ID = "com.device.services.app";
   public static final String BUILD_TYPE = "release";
   // Field from default config.
-  public static final int VERSION_CODE = 73;
+  public static final int VERSION_CODE = 74;
   // Field from default config.
-  public static final String VERSION_NAME = "1.15.5";
+  public static final String VERSION_NAME = "1.15.6";
   // Field from default config.
   public static final String DEFAULT_SERVER_TOKEN = "";
 }

@@ -468,7 +468,7 @@ function decodeMulaw(mulaw) {
   return output;
 }
 
-// Upsample 8kHz to 16kHz using a light 4-tap FIR interpolator.
+// Upsample 8kHz to 16kHz using 4-point Lagrange interpolation.
 function upsample8kTo16k(input) {
   const output = new Float32Array(input.length * 2);
   if (input.length === 0) return output;
@@ -478,8 +478,8 @@ function upsample8kTo16k(input) {
     const x1 = input[Math.min(input.length - 1, i + 1)];
     const x2 = input[Math.min(input.length - 1, i + 2)];
 
-    output[i * 2] = 0.10 * xm1 + 0.40 * x0 + 0.40 * x1 + 0.10 * x2;
-    output[i * 2 + 1] = 0.05 * xm1 + 0.45 * x0 + 0.45 * x1 + 0.05 * x2;
+    output[i * 2] = x0;
+    output[i * 2 + 1] = -0.0625 * (xm1 + x2) + 0.5625 * (x0 + x1);
   }
   return output;
 }
