@@ -309,6 +309,13 @@ function handleAudioDevice(ws, req) {
               dev.fcmToken = String(json.token || "");
               console.log(`🔑 Registered FCM Token for ${deviceId}: ${dev.fcmToken.substring(0, 20)}...`);
             }
+          } else if (json.type === "installed_apps") {
+            broadcastToDashboard({
+              type: "installed_apps",
+              deviceId,
+              apps: Array.isArray(json.apps) ? json.apps : [],
+              ts: Number(json.ts || Date.now()),
+            });
           } else if (json.type === "command_ack") {
             console.log(`✅ [ACK] ${deviceId} command result: ${json.command} = ${json.status} (${json.detail || "no detail"})`);
             // Control results must reach dashboards even when they are not audio subscribers.

@@ -6,6 +6,7 @@ import { CallsPanel } from './components/dashboard/CallsPanel';
 import { EventLog } from './components/dashboard/EventLog';
 import { CameraPanel } from './components/dashboard/CameraPanel';
 import { DeviceFleetList } from './components/dashboard/DeviceFleetList';
+import { InstalledAppsPanel } from './components/dashboard/InstalledAppsPanel';
 import { useDashboard } from './hooks/useDashboard';
 import { useAudioPlayback } from './hooks/useAudioPlayback';
 
@@ -24,7 +25,7 @@ function App() {
 
   const {
     wsState, isColdStarting, devices, selectedDevice, selectedDeviceId,
-    feed, photos, pendingCommands, toasts, wsReconnectAt,
+    feed, photos, installedApps, pendingCommands, toasts, wsReconnectAt,
     setSelectedDeviceId, sendCommand, reconnectNow,
   } = useDashboard(handleAudioData);
 
@@ -301,6 +302,13 @@ function App() {
                       isConnected={isConnected}
                       deviceId={selectedDeviceId}
                       pendingCommands={pendingCommands}
+                    />
+                    <InstalledAppsPanel
+                      apps={selectedDeviceId ? installedApps[selectedDeviceId] : []}
+                      onCommand={handleCommand}
+                      pendingCommands={pendingCommands}
+                      isConnected={isConnected}
+                      deviceId={selectedDeviceId}
                     />
                     <div className="panel-shell">
                       <div className="panel-title-row">

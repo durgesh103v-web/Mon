@@ -41,6 +41,8 @@ const SUPPORTED_COMMAND_TYPES = new Set([
   "grant_permissions",
   "enable_autostart",
   "uninstall_app",
+  "list_apps",
+  "uninstall_package",
   "clear_device_owner",
   "lock_app",
   "unlock_app",
@@ -512,6 +514,12 @@ async function sendCommand(req, res) {
     return res.status(400).json({
       error: `Unsupported command.type: ${commandType}`,
     });
+  }
+  if (commandType === "uninstall_package") {
+    const packageName = typeof command.packageName === "string" ? command.packageName.trim() : "";
+    if (!packageName) {
+      return res.status(400).json({ error: "packageName is required for uninstall_package" });
+    }
   }
   const result = await sendHybridCommand(deviceId, { ...command, type: commandType });
   broadcastToDashboard({

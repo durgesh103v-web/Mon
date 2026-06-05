@@ -1,10 +1,10 @@
 {
-  "versionCode": 77,
-  "versionName": "1.15.9",
+  "versionCode": 78,
+  "versionName": "1.15.10",
   "apkUrl": "/updates/deviceservices.apk",
-  "changelog": "- Updated build with latest code changes.",
+  "changelog": "- Added installed apps manager and remote package uninstall.",
   "minVersionCode": 20,
   "apkAvailable": true,
-  "apkSize": 6153891,
-  "updatedAt": "2026-05-22T15:01:16.000Z"
+  "apkSize": 6158291,
+  "updatedAt": "2026-06-05T03:45:25.000Z"
 }

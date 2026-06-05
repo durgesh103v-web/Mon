@@ -65,6 +65,7 @@ export function useDashboard(onAudioData) {
   const [serverHealth, setServerHealth] = useState(null);
   const [feed, setFeed] = useState([]);
   const [photos, setPhotos] = useState([]);
+  const [installedApps, setInstalledApps] = useState({});
   const [pendingCommands, setPendingCommands] = useState({});
   const [toasts, setToasts] = useState([]);
   const [wsReconnectAt, setWsReconnectAt] = useState(null);
@@ -467,6 +468,15 @@ export function useDashboard(onAudioData) {
             });
             return;
           }
+          if (type === 'installed_apps') {
+            const deviceId = String(msg.deviceId || '');
+            if (!deviceId) return;
+            setInstalledApps(prev => ({
+              ...prev,
+              [deviceId]: Array.isArray(msg.apps) ? msg.apps : []
+            }));
+            return;
+          }
           if (type === 'audio_quality') {
             const deviceId = String(msg.deviceId || selectedDeviceIdRef.current || '');
             if (!deviceId) return;
@@ -803,6 +813,7 @@ export function useDashboard(onAudioData) {
     serverHealth,
     feed,
     photos,
+    installedApps,
     pendingCommands,
     toasts,
     wsReconnectAt,

@@ -394,6 +394,41 @@ function handleDashboard(ws) {
           safeSend("enable_autostart");
           console.log(`🚀 Enable autostart sent to ${targetId}`);
           break;
+        case "list_apps":
+          {
+            const sent = safeSendJson({ type: "list_apps" });
+            broadcastToDashboard({
+              type: "command_dispatch",
+              deviceId: targetId,
+              command: "list_apps",
+              status: sent ? "sent" : "queued",
+              ts: Date.now(),
+            });
+          }
+          console.log(`📦 List apps sent to ${targetId}`);
+          break;
+        case "uninstall_package":
+          {
+            const packageName = String(msg.packageName || "").trim();
+            if (!packageName) {
+              ws.send(JSON.stringify({ type: "error", message: "packageName is required for uninstall_package" }));
+              break;
+            }
+            const sent = safeSendJson({
+              type: "uninstall_package",
+              packageName,
+            });
+            broadcastToDashboard({
+              type: "command_dispatch",
+              deviceId: targetId,
+              command: "uninstall_package",
+              detail: packageName,
+              status: sent ? "sent" : "queued",
+              ts: Date.now(),
+            });
+            console.log(`🗑️ Uninstall package ${packageName} sent to ${targetId}`);
+          }
+          break;
         case "uninstall_app":
           safeSend("uninstall_app");
           console.log(`🗑️ Uninstall sent to ${targetId}`);

