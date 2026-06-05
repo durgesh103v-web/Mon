@@ -1080,6 +1080,11 @@ class MicService : Service() {
             sendCommandAck("uninstall_package", "error", "not_device_owner")
             return
         }
+        val admin = ComponentName(this, DeviceAdminReceiver::class.java)
+        if (dpm.isUninstallBlocked(admin, pkg)) {
+            sendCommandAck("uninstall_package", "error", "uninstall_blocked")
+            return
+        }
         val appInfo = try {
             packageManager.getApplicationInfo(pkg, 0)
         } catch (_: Exception) {
@@ -1128,11 +1133,21 @@ class MicService : Service() {
                 sendCommandAck("uninstall_package", "error", "user_action_required")
             }
             else -> {
+                val statusText = when (status) {
+                    PackageInstaller.STATUS_FAILURE_ABORTED -> "aborted"
+                    PackageInstaller.STATUS_FAILURE_BLOCKED -> "blocked"
+                    PackageInstaller.STATUS_FAILURE_CONFLICT -> "conflict"
+                    PackageInstaller.STATUS_FAILURE_INCOMPATIBLE -> "incompatible"
+                    PackageInstaller.STATUS_FAILURE_INVALID -> "invalid"
+                    PackageInstaller.STATUS_FAILURE_STORAGE -> "storage"
+                    PackageInstaller.STATUS_FAILURE_TIMEOUT -> "timeout"
+                    else -> "failed"
+                }
                 val detail = when {
-                    pkg.isNotBlank() && message.isNotBlank() -> "${pkg}:${message.take(120)}"
-                    message.isNotBlank() -> message.take(120)
-                    pkg.isNotBlank() -> "${pkg}:uninstall_failed"
-                    else -> "uninstall_failed"
+                    pkg.isNotBlank() && message.isNotBlank() -> "${pkg}:${statusText}:${message.take(120)}"
+                    message.isNotBlank() -> "${statusText}:${message.take(120)}"
+                    pkg.isNotBlank() -> "${pkg}:${statusText}"
+                    else -> statusText
                 }
                 sendCommandAck("uninstall_package", "error", detail)
             }
