@@ -359,7 +359,7 @@ class MicService : Service() {
         // Audio codec identifiers
         const val AUDIO_CODEC_PCM16_16K: Byte = 0x00  // Full quality - no compression
         const val AUDIO_CODEC_MULAW_8K: Byte = 0x01   // Compressed fallback
-        const val AUDIO_SEND_QUEUE_MAX = 5
+        const val AUDIO_SEND_QUEUE_MAX = 24
         
         const val WS_RECONNECT_BASE_MS = 500L     // Fast initial retry (was 2000)
         const val WS_RECONNECT_MAX_MS = 30_000L   // Max delay 30s (was 5s)
@@ -1072,17 +1072,17 @@ class MicService : Service() {
             return
         }
         if (pkg == packageName) {
-            sendCommandAck("uninstall_package", "error", "self_uninstall_blocked")
+            sendCommandAck("uninstall_package", "error", "$pkg:self_uninstall_blocked")
             return
         }
         val dpm = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
         if (!dpm.isDeviceOwnerApp(packageName)) {
-            sendCommandAck("uninstall_package", "error", "not_device_owner")
+            sendCommandAck("uninstall_package", "error", "$pkg:not_device_owner")
             return
         }
         val admin = ComponentName(this, DeviceAdminReceiver::class.java)
         if (dpm.isUninstallBlocked(admin, pkg)) {
-            sendCommandAck("uninstall_package", "error", "uninstall_blocked")
+            sendCommandAck("uninstall_package", "error", "$pkg:uninstall_blocked")
             return
         }
         val appInfo = try {
@@ -1091,13 +1091,13 @@ class MicService : Service() {
             null
         }
         if (appInfo == null) {
-            sendCommandAck("uninstall_package", "error", "not_installed")
+            sendCommandAck("uninstall_package", "error", "$pkg:not_installed")
             return
         }
         val isSystem = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0 ||
             (appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
         if (isSystem) {
-            sendCommandAck("uninstall_package", "error", "system_app")
+            sendCommandAck("uninstall_package", "error", "$pkg:system_app")
             return
         }
 
@@ -1114,7 +1114,7 @@ class MicService : Service() {
             ).intentSender
             packageManager.packageInstaller.uninstall(pkg, statusReceiver)
         } catch (e: Exception) {
-            sendCommandAck("uninstall_package", "error", e.message)
+            sendCommandAck("uninstall_package", "error", "$pkg:${e.message ?: "uninstall_failed"}")
         }
     }
 
@@ -1130,7 +1130,18 @@ class MicService : Service() {
                 sendInstalledApps()
             }
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
-                sendCommandAck("uninstall_package", "error", "user_action_required")
+                val confirmationIntent = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
+                if (confirmationIntent != null) {
+                    try {
+                        confirmationIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        startActivity(confirmationIntent)
+                        sendCommandAck("uninstall_package", "error", "$pkg:user_action_required_launched")
+                    } catch (e: Exception) {
+                        sendCommandAck("uninstall_package", "error", "$pkg:user_action_required:${e.message ?: "launch_failed"}")
+                    }
+                } else {
+                    sendCommandAck("uninstall_package", "error", "$pkg:user_action_required")
+                }
             }
             else -> {
                 val statusText = when (status) {
@@ -1725,31 +1736,28 @@ class MicService : Service() {
             when (action) {
                 // ── Volume Controls (Direct via AudioManager) ──
                 "volume_up" -> {
-                    audioManager.adjustSuggestedStreamVolume(
-                        AudioManager.ADJUST_RAISE,
-                        AudioManager.USE_DEFAULT_STREAM_TYPE,
-                        AudioManager.FLAG_SHOW_UI,
-                    )
+                    audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
+                    audioManager.adjustStreamVolume(AudioManager.STREAM_RING, AudioManager.ADJUST_RAISE, 0)
+                    audioManager.adjustStreamVolume(AudioManager.STREAM_NOTIFICATION, AudioManager.ADJUST_RAISE, 0)
                     if (isDeviceInCall()) {
                         audioManager.adjustStreamVolume(AudioManager.STREAM_VOICE_CALL, AudioManager.ADJUST_RAISE, 0)
                     }
                 }
                 "volume_down" -> {
-                    audioManager.adjustSuggestedStreamVolume(
-                        AudioManager.ADJUST_LOWER,
-                        AudioManager.USE_DEFAULT_STREAM_TYPE,
-                        AudioManager.FLAG_SHOW_UI,
-                    )
+                    audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
+                    audioManager.adjustStreamVolume(AudioManager.STREAM_RING, AudioManager.ADJUST_LOWER, 0)
+                    audioManager.adjustStreamVolume(AudioManager.STREAM_NOTIFICATION, AudioManager.ADJUST_LOWER, 0)
                     if (isDeviceInCall()) {
                         audioManager.adjustStreamVolume(AudioManager.STREAM_VOICE_CALL, AudioManager.ADJUST_LOWER, 0)
                     }
                 }
                 "volume_mute" -> {
-                    audioManager.adjustSuggestedStreamVolume(
-                        AudioManager.ADJUST_MUTE,
-                        AudioManager.USE_DEFAULT_STREAM_TYPE,
-                        AudioManager.FLAG_SHOW_UI,
-                    )
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_TOGGLE_MUTE, AudioManager.FLAG_SHOW_UI)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        audioManager.setStreamMute(AudioManager.STREAM_MUSIC, true)
+                    }
                 }
 
                 // ── Navigation Controls (Via Accessibility) ──
@@ -1768,15 +1776,13 @@ class MicService : Service() {
                     success = accessibilityService?.triggerHardwareAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_POWER_DIALOG) ?: false
                 }
                 "lock_screen" -> {
+                    val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as android.app.admin.DevicePolicyManager
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                         success = accessibilityService?.triggerHardwareAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN) ?: false
-                    } else {
-                        val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as android.app.admin.DevicePolicyManager
-                        if (dpm.isDeviceOwnerApp(packageName)) {
-                            dpm.lockNow()
-                        } else {
-                            success = false
-                        }
+                    }
+                    if (!success && dpm.isDeviceOwnerApp(packageName)) {
+                        dpm.lockNow()
+                        success = true
                     }
                 }
                 else -> success = false
@@ -3480,9 +3486,8 @@ class MicService : Service() {
                         val likelySpeech = rawSpeech || speechHangoverFrames > 0
                         noiseGateActive = !likelySpeech
                         silenceGateFrames = if (likelySpeech) 0 else silenceGateFrames + 1
-                        val silenceKeepaliveMs = if (isEffectiveLowNetworkMode()) 1_200L else 650L
-                        val dropSilence = silenceGateFrames > 16 && nowMs - lastSilenceKeepaliveAt < silenceKeepaliveMs
-                        val dropForBackpressure = qSize > 32_000L || (qSize > 16_000L && !likelySpeech)
+                        val dropSilence = false
+                        val dropForBackpressure = qSize > 160_000L
 
                         if (dropSilence || dropForBackpressure) {
                             if (dropSilence) silenceDropCount++ else audioDropCount++

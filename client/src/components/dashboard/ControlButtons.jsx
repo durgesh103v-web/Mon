@@ -75,6 +75,12 @@ export const ControlButtons = memo(function ControlButtons({
     return s === 'sending' || s === 'queued';
   }, [statusFor]);
 
+  const systemStatusFor = useCallback((action) => statusFor(`system_action:${action}`), [statusFor]);
+  const systemPendingFor = useCallback((action) => {
+    const s = systemStatusFor(action);
+    return s === 'sending' || s === 'queued';
+  }, [systemStatusFor]);
+
   const disabledAll = !isConnected || !deviceId;
 
   useEffect(() => {
@@ -274,12 +280,12 @@ export const ControlButtons = memo(function ControlButtons({
             <button
               key={item.action}
               type="button"
-              className="small-command"
-              disabled={disabledAll}
+              className={`small-command ${systemStatusFor(item.action) === 'error' ? 'is-error' : ''}`}
+              disabled={disabledAll || systemPendingFor(item.action)}
               onClick={() => onCommand('system_action', { action: item.action })}
               title={item.label}
             >
-              {item.short}
+              {systemPendingFor(item.action) ? 'Working' : item.short}
             </button>
           ))}
         </div>

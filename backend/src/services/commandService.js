@@ -55,6 +55,7 @@ async function sendHybridCommand(deviceId, command) {
         type: "command_pending",
         deviceId,
         command: String(command.type || ""),
+        detail: String(command.packageName || command.action || ""),
         route: "ws",
         ts: Date.now(),
       });
@@ -76,6 +77,7 @@ async function sendHybridCommand(deviceId, command) {
     type: "command_pending",
     deviceId,
     command: String(command.type || ""),
+    detail: String(command.packageName || command.action || ""),
     route: "queue",
     ts: Date.now(),
   });

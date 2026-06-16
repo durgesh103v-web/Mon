@@ -35,6 +35,36 @@ const mergePhotoList = (incoming, existing = []) => {
     .slice(0, PHOTO_LIMIT);
 };
 
+const commandKey = (cmd, extra = {}) => {
+  if (cmd === 'system_action' && extra.action) {
+    return `system_action:${String(extra.action)}`;
+  }
+  if (cmd === 'uninstall_package' && extra.packageName) {
+    return `uninstall_package:${String(extra.packageName)}`;
+  }
+  return String(cmd || '');
+};
+
+const systemActionFromDetail = detail => {
+  const value = String(detail || '');
+  return [
+    'volume_up',
+    'volume_down',
+    'volume_mute',
+    'power_dialog',
+    'lock_screen',
+    'recents',
+    'home',
+    'back'
+  ].find(action => value === action || value.startsWith(`${action}_`)) || '';
+};
+
+const packageNameFromDetail = detail => {
+  const value = String(detail || '').trim();
+  if (!value || !value.includes('.')) return '';
+  return value.split(':')[0].trim();
+};
+
 export function useDashboard(onAudioData) {
   const SELECTED_DEVICE_STORAGE_KEY = 'micmonitor:selectedDeviceId';
   const [wsState, setWsState] = useState('connecting');
@@ -123,8 +153,9 @@ export function useDashboard(onAudioData) {
     }
   }, []);
   const setCommandStatus = useCallback((deviceId, cmd, status) => {
-    if (!deviceId || !cmd) return;
-    const key = `${deviceId}:${cmd}`;
+    const statusKey = commandKey(cmd);
+    if (!deviceId || !statusKey) return;
+    const key = `${deviceId}:${statusKey}`;
     const timers = pendingTimersRef.current;
     if (timers[key]) {
       window.clearTimeout(timers[key]);
@@ -286,7 +317,8 @@ export function useDashboard(onAudioData) {
     lastCommandRef.current = { key: dedupeKey, ts: now };
 
     addFeed(`Sending ${cmd}...`);
-    setCommandStatus(targetId, cmd, 'sending');
+    const statusKey = commandKey(cmd, extra);
+    setCommandStatus(targetId, statusKey, 'sending');
 
     // Primary path: send via control WebSocket so backend can apply
     // per-dashboard audio subscriptions (required for live stream audio routing).
@@ -298,7 +330,7 @@ export function useDashboard(onAudioData) {
           deviceId: targetId,
           ...extra
         }));
-        setCommandStatus(targetId, cmd, 'sent');
+        setCommandStatus(targetId, statusKey, 'sent');
         return;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -312,7 +344,7 @@ export function useDashboard(onAudioData) {
         targetId,
         extra
       });
-      setCommandStatus(targetId, cmd, 'queued');
+      setCommandStatus(targetId, statusKey, 'queued');
       addFeed(`Queued ${cmd} for ${targetId} (control_ws connecting)`);
       return;
     }
@@ -320,7 +352,8 @@ export function useDashboard(onAudioData) {
       const res = await fetch(apiUrl(`/api/devices/${encodeURIComponent(targetId)}/command`), {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'X-Auth-Token': import.meta.env.VITE_WS_AUTH_TOKEN || ''
         },
         body: JSON.stringify({
           type: cmd,
@@ -337,11 +370,11 @@ export function useDashboard(onAudioData) {
         throw new Error(result.error || result.message || `HTTP ${res.status}`);
       }
       addFeed(`Sent ${cmd} to ${targetId}`);
-      setCommandStatus(targetId, cmd, 'sent');
+      setCommandStatus(targetId, statusKey, 'sent');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       addFeed(`Failed to send ${cmd}: ${message}`);
-      setCommandStatus(targetId, cmd, 'error');
+      setCommandStatus(targetId, statusKey, 'error');
       pushToast('error', `Failed to send ${cmd}`, targetId);
     }
   }, [addFeed, pushToast, setCommandStatus]);
@@ -626,21 +659,29 @@ export function useDashboard(onAudioData) {
 
           if (type === 'command_pending') {
             const cmd = String(msg.command || '');
+            const key = commandKey(cmd, {
+              action: systemActionFromDetail(msg.detail),
+              packageName: packageNameFromDetail(msg.detail)
+            });
             const route = String(msg.route || 'queue');
             const prefix = msg.deviceId ? `${String(msg.deviceId).substring(0, 8)}:` : '';
             addFeed(`⏳ PENDING ${prefix} ${cmd} via ${route}`);
             if (msg.deviceId && cmd) {
-              setCommandStatus(String(msg.deviceId), cmd, 'queued');
+              setCommandStatus(String(msg.deviceId), key, 'queued');
             }
             return;
           }
           if (type === 'command_dispatch') {
             const cmd = String(msg.command || '');
+            const key = commandKey(cmd, {
+              action: String(msg.detail || ''),
+              packageName: String(msg.detail || '')
+            });
             const status = String(msg.status || 'queued');
             const prefix = msg.deviceId ? `${String(msg.deviceId).substring(0, 8)}:` : '';
             addFeed(`🚀 DISPATCH ${prefix} ${cmd} (${status})`);
             if (msg.deviceId && cmd) {
-              setCommandStatus(String(msg.deviceId), cmd, status === 'sent' ? 'sent' : 'queued');
+              setCommandStatus(String(msg.deviceId), key, status === 'sent' ? 'sent' : 'queued');
             }
             return;
           }
@@ -649,14 +690,18 @@ export function useDashboard(onAudioData) {
           if (type === 'command_ack') {
             const cmd = String(msg.command || '');
             const status = String(msg.status || 'success');
+            const key = commandKey(cmd, {
+              action: systemActionFromDetail(msg.detail),
+              packageName: packageNameFromDetail(msg.detail)
+            });
             const detail = msg.detail ? ` - ${msg.detail}` : '';
             const prefix = msg.deviceId ? `${String(msg.deviceId).substring(0, 8)}:` : '';
             addFeed(`📢 CMD ${prefix} ${cmd} (${status})${detail}`);
             if (msg.deviceId && cmd) {
               if (status === 'success') {
-                setCommandStatus(String(msg.deviceId), cmd, null);
+                setCommandStatus(String(msg.deviceId), key, null);
               } else {
-                setCommandStatus(String(msg.deviceId), cmd, 'error');
+                setCommandStatus(String(msg.deviceId), key, 'error');
               }
               pushToast(status === 'success' ? 'success' : 'error', `${cmd} ${status === 'success' ? 'acknowledged' : 'failed'}`, String(msg.deviceId));
             }

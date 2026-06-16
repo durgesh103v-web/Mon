@@ -526,6 +526,11 @@ async function sendCommand(req, res) {
     type: "command_dispatch",
     deviceId,
     command: commandType,
+    detail: commandType === "uninstall_package"
+      ? String(command.packageName || "")
+      : commandType === "system_action"
+        ? String(command.action || "")
+        : undefined,
     status: result.status,
     ts: Date.now(),
   });

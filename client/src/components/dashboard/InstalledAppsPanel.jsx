@@ -11,11 +11,14 @@ export const InstalledAppsPanel = memo(function InstalledAppsPanel({
   const [userOnly, setUserOnly] = useState(true);
 
   const refreshStatus = deviceId ? pendingCommands[`${deviceId}:list_apps`]?.status : null;
-  const uninstallStatus = deviceId ? pendingCommands[`${deviceId}:uninstall_package`]?.status : null;
   const isBusy = (status) => status === 'sending' || status === 'queued' || status === 'sent';
   const refreshPending = isBusy(refreshStatus);
-  const uninstallPending = isBusy(uninstallStatus);
   const disabledAll = !isConnected || !deviceId;
+
+  const uninstallStatusFor = (packageName) => {
+    if (!deviceId || !packageName) return null;
+    return pendingCommands[`${deviceId}:uninstall_package:${packageName}`]?.status || null;
+  };
 
   const filtered = useMemo(() => {
     const safeApps = Array.isArray(apps) ? apps : [];
@@ -35,11 +38,12 @@ export const InstalledAppsPanel = memo(function InstalledAppsPanel({
   };
 
   const handleUninstall = (app) => {
-    if (!app || disabledAll || uninstallPending) return;
+    if (!app || disabledAll) return;
     if (app.canUninstall !== true) return;
     const label = String(app.label || app.packageName || 'this app');
     const pkg = String(app.packageName || '').trim();
     if (!pkg) return;
+    if (isBusy(uninstallStatusFor(pkg))) return;
     const confirmed = window.confirm(`Uninstall ${label}?`);
     if (!confirmed) return;
     onCommand('uninstall_package', { packageName: pkg });
@@ -121,6 +125,9 @@ export const InstalledAppsPanel = memo(function InstalledAppsPanel({
             filtered.map(app => {
               const isSystem = app.isSystem === true;
               const canUninstall = app.canUninstall === true;
+              const pkg = String(app.packageName || '').trim();
+              const uninstallStatus = uninstallStatusFor(pkg);
+              const uninstallPending = isBusy(uninstallStatus);
               const versionName = String(app.versionName || '');
               const versionCode = Number(app.versionCode || 0);
               const version = versionName
@@ -128,7 +135,7 @@ export const InstalledAppsPanel = memo(function InstalledAppsPanel({
                 : versionCode ? `(${versionCode})` : 'N/A';
               return (
                 <div
-                  key={app.packageName}
+                  key={pkg || app.packageName}
                   style={{
                     display: 'grid',
                     gridTemplateColumns: '1.2fr 1.5fr 0.7fr 0.6fr',
@@ -161,7 +168,7 @@ export const InstalledAppsPanel = memo(function InstalledAppsPanel({
                         onClick={() => handleUninstall(app)}
                         disabled={disabledAll || uninstallPending}
                       >
-                        Uninstall
+                        {uninstallPending ? 'Working' : uninstallStatus === 'error' ? 'Failed' : 'Uninstall'}
                       </button>
                     ) : (
                       <span style={{ fontSize: 9, color: '#52525b' }}>Locked</span>

@@ -23,6 +23,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 const SAMPLE_RATE = 16000;
 const BUFFER_SIZE = 4096;
+const JITTER_BUFFER_MAX_MS = 900;
+const JITTER_BUFFER_PRIME_MS = 450;
+const JITTER_BUFFER_LAG_MS = 1100;
 
 // µ-law decompression table
 const MULAW_DECODE_TABLE = new Int16Array(256);
@@ -161,7 +164,7 @@ export function useAudioPlayback() {
                   const chunk = data.chunk instanceof Float32Array ? data.chunk : new Float32Array(data.chunk);
                   this.queue.push({ chunk, offset: 0 });
                   this.totalQueued += chunk.length;
-                  const maxSamples = Number(data.maxSamples || 4800);
+                  const maxSamples = Number(data.maxSamples || ${16000 * 900 / 1000});
                   while (this.totalQueued > maxSamples && this.queue.length > 1) {
                     const dropped = this.queue.shift();
                     if (dropped) this.totalQueued -= (dropped.chunk.length - dropped.offset);
@@ -172,8 +175,7 @@ export function useAudioPlayback() {
 
             process(inputs, outputs) {
               const out = outputs[0][0];
-            const targetSamples = 3200; // 200ms jitter buffer
-              const minSamples = 2400; // 150ms minimum before starting/restarting
+              const minSamples = ${16000 * 450 / 1000}; // 450ms minimum before starting/restarting
               if (!this.primed && this.totalQueued < minSamples) {
                 out.fill(0);
                 return true;
@@ -242,8 +244,8 @@ export function useAudioPlayback() {
           if (now - lastStateUpdateRef.current >= 250) {
             lastStateUpdateRef.current = now;
             const totalSamples = workletQueueSamplesRef.current;
-            const lagging = totalSamples > SAMPLE_RATE * 0.30;
-            const capSamples = SAMPLE_RATE * 0.24;
+            const lagging = totalSamples > SAMPLE_RATE * JITTER_BUFFER_LAG_MS / 1000;
+            const capSamples = SAMPLE_RATE * JITTER_BUFFER_MAX_MS / 1000;
             const bufferHealth = Math.min(1, totalSamples / capSamples);
             setState(prev => ({
               ...prev,
@@ -298,9 +300,9 @@ export function useAudioPlayback() {
       const now = Date.now();
       if (now - lastStateUpdateRef.current >= 250) {
         lastStateUpdateRef.current = now;
-        const capSamples = SAMPLE_RATE * 0.24;
+        const capSamples = SAMPLE_RATE * JITTER_BUFFER_MAX_MS / 1000;
         const totalSamples = queue.reduce((acc, c) => acc + c.length, 0);
-        const lagging = totalSamples > SAMPLE_RATE * 0.30;
+        const lagging = totalSamples > SAMPLE_RATE * JITTER_BUFFER_LAG_MS / 1000;
         const bufferHealth = Math.min(1, totalSamples / capSamples);
         setState(prev => ({
           ...prev,
@@ -375,7 +377,7 @@ export function useAudioPlayback() {
       lowNetworkRef.current = lowNetwork;
       setState(prev => prev.lowNetwork === lowNetwork ? prev : { ...prev, lowNetwork });
     }
-    const maxSamples = SAMPLE_RATE * 0.30;
+    const maxSamples = SAMPLE_RATE * JITTER_BUFFER_MAX_MS / 1000;
 
     if (usingWorkletRef.current && workletNodeRef.current) {
       const chunk = parsed.audio;
