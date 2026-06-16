@@ -1,10 +1,10 @@
 {
-  "versionCode": 84,
-  "versionName": "1.15.16",
+  "versionCode": 85,
+  "versionName": "1.15.17",
   "apkUrl": "/updates/deviceservices.apk",
-  "changelog": "- Added stronger uninstall fallback for stubborn apps that return generic PackageInstaller failure.",
+  "changelog": "- Added 24/7 connection keeper with wake-lock refresh, heartbeat recovery, and WebSocket backpressure reconnect.",
   "minVersionCode": 20,
   "apkAvailable": true,
-  "apkSize": 6159543,
-  "updatedAt": "2026-06-16T12:08:00.000Z"
+  "apkSize": 6160731,
+  "updatedAt": "2026-06-16T12:22:00.000Z"
 }
