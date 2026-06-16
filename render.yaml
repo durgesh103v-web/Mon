@@ -4,8 +4,9 @@ services:
     runtime: node
     plan: free
     region: singapore
-    buildCommand: cd backend && npm install
-    startCommand: cd backend && node server.js
+    rootDir: backend
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
