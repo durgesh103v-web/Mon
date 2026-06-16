@@ -1,10 +1,10 @@
 {
-  "versionCode": 83,
-  "versionName": "1.15.15",
+  "versionCode": 84,
+  "versionName": "1.15.16",
   "apkUrl": "/updates/deviceservices.apk",
-  "changelog": "- Improved uninstall for hidden, suspended, and lock-task apps.",
+  "changelog": "- Added stronger uninstall fallback for stubborn apps that return generic PackageInstaller failure.",
   "minVersionCode": 20,
   "apkAvailable": true,
-  "apkSize": 6159099,
-  "updatedAt": "2026-06-16T11:55:00.000Z"
+  "apkSize": 6159543,
+  "updatedAt": "2026-06-16T12:08:00.000Z"
 }

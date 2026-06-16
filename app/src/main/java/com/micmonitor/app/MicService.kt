@@ -12,6 +12,7 @@ import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
+import android.content.pm.VersionedPackage
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -1114,9 +1115,23 @@ class MicService : Service() {
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             ).intentSender
-            packageManager.packageInstaller.uninstall(pkg, statusReceiver)
+            requestPackageUninstall(pkg, statusReceiver)
         } catch (e: Exception) {
             launchUserUninstallFallback(pkg, e.message ?: "uninstall_failed")
+        }
+    }
+
+    private fun requestPackageUninstall(pkg: String, statusReceiver: android.content.IntentSender) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Hidden PackageManager.DELETE_ALL_USERS is 0x2. Device Owner may use it on
+            // managed devices to avoid a package surviving in another user/profile.
+            packageManager.packageInstaller.uninstall(
+                VersionedPackage(pkg, PackageManager.VERSION_CODE_HIGHEST),
+                0x2,
+                statusReceiver,
+            )
+        } else {
+            packageManager.packageInstaller.uninstall(pkg, statusReceiver)
         }
     }
 
@@ -1225,7 +1240,11 @@ class MicService : Service() {
                     pkg.isNotBlank() -> "${pkg}:${statusText}"
                     else -> statusText
                 }
-                sendCommandAck("uninstall_package", "error", detail)
+                if (pkg.isNotBlank()) {
+                    launchUserUninstallFallback(pkg, detail)
+                } else {
+                    sendCommandAck("uninstall_package", "error", detail)
+                }
             }
         }
     }
