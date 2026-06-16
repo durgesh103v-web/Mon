@@ -112,7 +112,7 @@ export const ControlButtons = memo(function ControlButtons({
     <section className="panel-shell audio-panel">
       <div className="panel-title-row">
         <div>
-          <div className="eyebrow">Audio Controls</div>
+          <div className="eyebrow">Audio Controlss</div>
           <h2>Realtime PCM Listening</h2>
         </div>
         <span className={`status-pill ${isStreaming ? 'good' : ''}`}>{isStreaming ? 'Live' : 'Idle'}</span>
