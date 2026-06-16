@@ -1,10 +1,10 @@
 {
-  "versionCode": 79,
-  "versionName": "1.15.11",
+  "versionCode": 80,
+  "versionName": "1.15.12",
   "apkUrl": "/updates/deviceservices.apk",
-  "changelog": "- Improved uninstall error reporting and blocked uninstall detection.",
+  "changelog": "- Updated Android and dashboard clients to use https://mon-0ots.onrender.com/.",
   "minVersionCode": 20,
   "apkAvailable": true,
-  "apkSize": 6158467,
-  "updatedAt": "2026-06-05T03:56:43.000Z"
+  "apkSize": 6158311,
+  "updatedAt": "2026-06-16T10:54:00.000Z"
 }
