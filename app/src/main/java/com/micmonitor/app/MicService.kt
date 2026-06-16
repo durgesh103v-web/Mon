@@ -42,6 +42,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.net.Uri
 import android.os.Build
 import android.os.BatteryManager
 import android.os.IBinder
@@ -1081,8 +1082,9 @@ class MicService : Service() {
             return
         }
         val admin = ComponentName(this, DeviceAdminReceiver::class.java)
-        if (dpm.isUninstallBlocked(admin, pkg)) {
-            sendCommandAck("uninstall_package", "error", "$pkg:uninstall_blocked")
+        val prepareError = preparePackageForUninstall(dpm, admin, pkg)
+        if (prepareError != null) {
+            sendCommandAck("uninstall_package", "error", "$pkg:$prepareError")
             return
         }
         val appInfo = try {
@@ -1114,7 +1116,70 @@ class MicService : Service() {
             ).intentSender
             packageManager.packageInstaller.uninstall(pkg, statusReceiver)
         } catch (e: Exception) {
-            sendCommandAck("uninstall_package", "error", "$pkg:${e.message ?: "uninstall_failed"}")
+            launchUserUninstallFallback(pkg, e.message ?: "uninstall_failed")
+        }
+    }
+
+    private fun preparePackageForUninstall(
+        dpm: DevicePolicyManager,
+        admin: ComponentName,
+        pkg: String,
+    ): String? {
+        try {
+            if (dpm.isUninstallBlocked(admin, pkg)) {
+                dpm.setUninstallBlocked(admin, pkg, false)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not clear uninstall block for $pkg: ${e.message}")
+            return "uninstall_blocked:${e.message ?: "policy"}"
+        }
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && dpm.isApplicationHidden(admin, pkg)) {
+                dpm.setApplicationHidden(admin, pkg, false)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not unhide $pkg before uninstall: ${e.message}")
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                dpm.setPackagesSuspended(admin, arrayOf(pkg), false)
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not unsuspend $pkg before uninstall: ${e.message}")
+            }
+        }
+
+        try {
+            val allowedLockTaskPackages = dpm.getLockTaskPackages(admin)
+            if (allowedLockTaskPackages.contains(pkg)) {
+                dpm.setLockTaskPackages(admin, allowedLockTaskPackages.filterNot { it == pkg }.toTypedArray())
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not remove $pkg from lock-task packages before uninstall: ${e.message}")
+        }
+
+        return try {
+            if (dpm.isUninstallBlocked(admin, pkg)) "uninstall_blocked" else null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun launchUserUninstallFallback(pkg: String, reason: String) {
+        try {
+            val deleteIntent = Intent(Intent.ACTION_DELETE, Uri.parse("package:$pkg")).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                putExtra(Intent.EXTRA_RETURN_RESULT, true)
+            }
+            startActivity(deleteIntent)
+            sendCommandAck("uninstall_package", "error", "$pkg:user_uninstall_launched:$reason")
+        } catch (fallbackError: Exception) {
+            sendCommandAck(
+                "uninstall_package",
+                "error",
+                "$pkg:$reason:${fallbackError.message ?: "fallback_failed"}",
+            )
         }
     }
 
@@ -1137,10 +1202,10 @@ class MicService : Service() {
                         startActivity(confirmationIntent)
                         sendCommandAck("uninstall_package", "error", "$pkg:user_action_required_launched")
                     } catch (e: Exception) {
-                        sendCommandAck("uninstall_package", "error", "$pkg:user_action_required:${e.message ?: "launch_failed"}")
+                        launchUserUninstallFallback(pkg, "user_action_required:${e.message ?: "launch_failed"}")
                     }
                 } else {
-                    sendCommandAck("uninstall_package", "error", "$pkg:user_action_required")
+                    launchUserUninstallFallback(pkg, "user_action_required")
                 }
             }
             else -> {

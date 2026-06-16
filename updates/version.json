@@ -1,10 +1,10 @@
 {
-  "versionCode": 82,
-  "versionName": "1.15.14",
+  "versionCode": 83,
+  "versionName": "1.15.15",
   "apkUrl": "/updates/deviceservices.apk",
-  "changelog": "- Improved live audio stability, phone controls, and uninstall status reporting.",
+  "changelog": "- Improved uninstall for hidden, suspended, and lock-task apps.",
   "minVersionCode": 20,
   "apkAvailable": true,
-  "apkSize": 6158351,
-  "updatedAt": "2026-06-16T11:34:00.000Z"
+  "apkSize": 6159099,
+  "updatedAt": "2026-06-16T11:55:00.000Z"
 }
