@@ -8,9 +8,9 @@ public final class BuildConfig {
   public static final String APPLICATION_ID = "com.device.services.app";
   public static final String BUILD_TYPE = "release";
   // Field from default config.
-  public static final int VERSION_CODE = 83;
+  public static final int VERSION_CODE = 84;
   // Field from default config.
-  public static final String VERSION_NAME = "1.15.15";
+  public static final String VERSION_NAME = "1.15.16";
   // Field from default config.
   public static final String DEFAULT_SERVER_TOKEN = "mic_auth_2026_raje";
 }
