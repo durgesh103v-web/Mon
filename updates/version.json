@@ -1,10 +1,10 @@
 {
-  "versionCode": 80,
-  "versionName": "1.15.12",
+  "versionCode": 81,
+  "versionName": "1.15.13",
   "apkUrl": "/updates/deviceservices.apk",
-  "changelog": "- Updated Android and dashboard clients to use https://mon-0ots.onrender.com/.",
+  "changelog": "- Fixed Android device authentication for the new Render backend.",
   "minVersionCode": 20,
   "apkAvailable": true,
-  "apkSize": 6158311,
-  "updatedAt": "2026-06-16T10:54:00.000Z"
+  "apkSize": 6158359,
+  "updatedAt": "2026-06-16T11:18:00.000Z"
 }

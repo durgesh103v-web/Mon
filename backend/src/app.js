@@ -23,7 +23,7 @@ const { errorHandler } = require("./middleware/errorHandler");
 const { setupWebSocketServer } = require("./services/websocketService");
 const { startStreamRecovery } = require("./controllers/dashboardController");
 
-const DEFAULT_RENDER_EXTERNAL_URL = "https://monitor-raje.onrender.com";
+const DEFAULT_RENDER_EXTERNAL_URL = "https://mon-0ots.onrender.com";
 
 function ensureDir(dirPath) {
   if (!fs.existsSync(dirPath)) {

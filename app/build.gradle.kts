@@ -8,8 +8,8 @@ plugins {
 }
 
 // Version management - increment versionCode for each release
-val appVersionCode = 80  // Increment this for each update
-val appVersionName = "1.15.12"  // Human-readable version
+val appVersionCode = 81  // Increment this for each update
+val appVersionName = "1.15.13"  // Human-readable version
 val localProps = Properties().apply {
     val propsFile = rootProject.file("local.properties")
     if (propsFile.exists()) load(propsFile.inputStream())
@@ -47,7 +47,7 @@ if (wantsReleaseBuild && !hasReleaseSigning) {
 
 val defaultServerToken = (System.getenv("DEFAULT_SERVER_TOKEN")
     ?: localProps.getProperty("DEFAULT_SERVER_TOKEN")
-    ?: "")
+    ?: "mic_auth_2026_raje")
     .replace("\\", "\\\\")
     .replace("\"", "\\\"")
 

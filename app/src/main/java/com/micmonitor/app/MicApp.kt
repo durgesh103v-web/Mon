@@ -109,6 +109,12 @@ class MicApp : Application() {
             prefs.edit().putString("server_url", MicService.DEFAULT_SERVER_URL).apply()
             Log.i(TAG, "Set default server URL (migrated if needed)")
         }
+
+        val existingToken = prefs.getString("server_token", null).orEmpty().trim()
+        if (existingToken.isBlank() && MicService.DEFAULT_SERVER_TOKEN.isNotBlank()) {
+            prefs.edit().putString("server_token", MicService.DEFAULT_SERVER_TOKEN).apply()
+            Log.i(TAG, "Set default server auth token")
+        }
     }
 
     private fun isLocalOrLegacyServerUrl(url: String): Boolean {
