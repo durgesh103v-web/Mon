@@ -23,7 +23,8 @@ class MainActivity : AppCompatActivity() {
         private const val TAG = "MainActivity"
         private const val REQUEST_CODE = 1001
         private val LEGACY_SERVER_HOSTS = setOf(
-            "micmonitor-server.onrender.com"
+            "micmonitor-server.onrender.com",
+            "monitor-raje.onrender.com"
         )
     }
 

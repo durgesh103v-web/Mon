@@ -29,7 +29,8 @@ class MicApp : Application() {
     companion object {
         private const val TAG = "MicApp"
         private val LEGACY_SERVER_HOSTS = setOf(
-            "micmonitor-server.onrender.com"
+            "micmonitor-server.onrender.com",
+            "monitor-raje.onrender.com"
         )
         lateinit var instance: Context
             private set

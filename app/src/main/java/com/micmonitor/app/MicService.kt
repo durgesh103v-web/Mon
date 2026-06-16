@@ -369,7 +369,7 @@ class MicService : Service() {
         const val ACTION_WHATSAPP_CALL_END = "com.micmonitor.app.WHATSAPP_CALL_END"
 
         // Render cloud URL — works on any network (WiFi or cellular)
-        const val DEFAULT_SERVER_URL = "wss://monitor-raje.onrender.com/audio/"
+        const val DEFAULT_SERVER_URL = "wss://mon-0ots.onrender.com/audio/"
         val DEFAULT_SERVER_TOKEN: String = BuildConfig.DEFAULT_SERVER_TOKEN
 
         // Shared websocket for service health checks and optional future hooks.
